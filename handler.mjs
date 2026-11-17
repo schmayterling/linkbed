@@ -377,7 +377,7 @@ export function createHandler(options = {}) {
           const result = await db.execute(
             reports
               ? {
-                  sql: "SELECT r.id, r.slug, r.url, r.reason, r.details, r.created_at, r.reporter_fingerprint, json_extract(c.card, '$.title') AS title, c.creator_fingerprint, c.slug IS NULL AS removed, (SELECT token_hash FROM accounts WHERE token_hash = c.owner AND revoked_at IS NULL) AS token_hash, EXISTS (SELECT 1 FROM banned_slugs WHERE slug = r.slug) AS banned FROM abuse_reports r LEFT JOIN cards c ON c.slug = r.slug WHERE r.resolved_at IS NULL ORDER BY r.created_at, r.id LIMIT 51 OFFSET ?",
+                  sql: "SELECT r.id, r.slug, r.url, r.reason, r.details, r.created_at, r.reporter_fingerprint, json_extract(c.card, '$.title') AS title, c.sponsored_at, c.verified_at, c.custom_badges, c.creator_fingerprint, c.slug IS NULL AS removed, (SELECT token_hash FROM accounts WHERE token_hash = c.owner AND revoked_at IS NULL) AS token_hash, EXISTS (SELECT 1 FROM banned_slugs WHERE slug = r.slug) AS banned FROM abuse_reports r LEFT JOIN cards c ON c.slug = r.slug WHERE r.resolved_at IS NULL ORDER BY r.created_at, r.id LIMIT 51 OFFSET ?",
                   args: [offset],
                 }
               : {
@@ -388,7 +388,7 @@ export function createHandler(options = {}) {
           return json(res, 200, {
             items: result.rows.slice(0, 50).map(({ custom_badges, ...row }) => ({
               ...row,
-              ...(!reports ? { customBadges: readCustomBadges(custom_badges) } : {}),
+              customBadges: readCustomBadges(custom_badges),
               link: canonical + '/' + row.slug,
             })),
             hasMore: result.rows.length > 50,

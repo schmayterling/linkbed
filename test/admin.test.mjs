@@ -354,6 +354,12 @@ test('abuse reports persist, throttle, and can be dismissed or resolved by local
     );
     assert.equal((await report({ url: 'https://linkbed.me/card-0', confirmed: true })).status, 429);
     assert.equal(inspect.prepare('SELECT COUNT(*) AS count FROM abuse_reports').get().count, 2);
+    const badges = [{ name: 'community helper', image: 'https://example.com/badge.gif' }];
+    inspect
+      .prepare(
+        'UPDATE cards SET verified_at = ?, sponsored_at = ?, custom_badges = ? WHERE slug = ?',
+      )
+      .run(1234, 5678, JSON.stringify(badges), 'card-0');
     const reports = await request('/api/admin/reports').then((r) => r.json());
     assert.equal(reports.items.length, 2);
     assert.equal(reports.items[0].url, 'https://linkbed.me/card-0');
@@ -362,6 +368,15 @@ test('abuse reports persist, throttle, and can be dismissed or resolved by local
     assert.equal(reports.items[0].details, null);
     assert.equal(reports.items[1].reason, 'other');
     assert.equal(reports.items[1].details, '<script>alert(2)</script>');
+    const {
+      items: [card],
+    } = await request('/api/admin/cards?q=card-0').then((r) => r.json());
+    for (const report of reports.items) {
+      assert.equal(report.verified_at, card.verified_at);
+      assert.equal(report.sponsored_at, card.sponsored_at);
+      assert.deepEqual(report.customBadges, card.customBadges);
+      assert.deepEqual(report.customBadges, badges);
+    }
     const storedReports = inspect
       .prepare('SELECT reason, details FROM abuse_reports ORDER BY id')
       .all();
