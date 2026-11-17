@@ -32,7 +32,11 @@ test('report links accept only card paths on this site and reserve admin', () =>
   ]) {
     assert.throws(() => normalizeReportLink(url, origin), undefined, url);
   }
-  for (const slug of ['admin', 'terms', 'privacy']) assert.throws(() => normalizeSlug(slug));
+  for (const slug of ['api', 'healthz', 'admin', 'terms', 'privacy', '404']) {
+    assert.throws(() => normalizeSlug(slug));
+    assert.throws(() => normalizeReportLink('https://linkbed.me/' + slug, origin));
+    assert.throws(() => normalizeReportLink('https://linkbed.me/p/' + slug, origin));
+  }
 });
 
 test('admin boundary rejects spoofed hosts, proxies, remote clients and non-local listeners', () => {

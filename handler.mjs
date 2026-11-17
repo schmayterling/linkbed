@@ -234,7 +234,10 @@ export function createHandler(options = {}) {
       if (path === '/p/admin' || (admin && !options.allowAdmin?.(req)))
         throw fail(404, 'page not found.');
       pageRequest = !path.startsWith('/api/') && !admin && path !== '/healthz';
-      if (path === '/api/index' && url.searchParams.has('notfound')) {
+      if (
+        /^\/(?:p\/)?404\/?$/.test(path) ||
+        (path === '/api/index' && url.searchParams.has('notfound'))
+      ) {
         pageRequest = true;
         throw fail(404, 'page not found.');
       }

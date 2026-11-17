@@ -23,7 +23,7 @@ test('missing and suspended pages return the same real 404 while APIs keep JSON 
     await fetch(base + '/healthz');
     const db = new DatabaseSync(dbPath);
     const card = normalizeCard({ title: 'private suspended title', url: null });
-    for (const slug of ['active', 'suspended'])
+    for (const slug of ['active', 'suspended', '404'])
       db.prepare(
         'INSERT INTO cards (slug, owner, card, revision, updated_at) VALUES (?, ?, ?, 1, ?)',
       ).run(slug, 'test', JSON.stringify(card), Date.now());
@@ -32,6 +32,11 @@ test('missing and suspended pages return the same real 404 while APIs keep JSON 
 
     let expected;
     for (const path of [
+      '/404',
+      '/404/',
+      '/p/404',
+      '/p/404/',
+      '/api/index?card=404',
       '/does-not-exist',
       '/p/does-not-exist',
       '/api/index?card=does-not-exist',

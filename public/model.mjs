@@ -181,7 +181,7 @@ export function normalizeSlug(value) {
     typeof value !== 'string' ||
     !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) ||
     value.length > 60 ||
-    ['api', 'healthz', 'admin', 'terms', 'privacy'].includes(value)
+    ['api', 'healthz', 'admin', 'terms', 'privacy', '404'].includes(value)
   ) {
     throw new ValidationError(
       'use 1–60 lowercase letters, numbers, and single hyphens for the link.',
