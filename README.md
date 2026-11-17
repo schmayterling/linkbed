@@ -1,10 +1,15 @@
 ## linkbed
 
-make custom discord cards with **real buttons**, images, and rich text for your website or links.
+make a custom discord-styled site or discord embed with **real buttons**, images, and rich text for your website or links.
 
 [try it](https://linkbed.me)
 
-![linkbed editor and discord preview](docs/screenshot.png)
+<img width="3240" height="2176" alt="CleanShot 2026-11-17 at 3 20 36 PM@2x" src="https://github.com/user-attachments/assets/bbee4ef8-e69a-4392-a205-be6f3a767230" />
+
+<img width="3240" height="2176" alt="CleanShot 2026-11-17 at 3 21 58 PM@2x" src="https://github.com/user-attachments/assets/5a9f331d-3996-4062-aeca-1e5837f140ff" />
+
+<img width="1196" height="772" alt="CleanShot 2026-11-17 at 3 22 59 PM@2x" src="https://github.com/user-attachments/assets/cae6cb9e-7d3c-4911-88c5-a34a2ebe07d5" />
+
 
 ## running locally
 
