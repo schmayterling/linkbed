@@ -1,9 +1,15 @@
 import {
   normalizeCard,
   normalizeComponent,
+  normalizePageCard,
+  isBadgeCase,
+  selectedEmbedIndex,
+  MAX_BADGES,
   normalizeSlug,
   normalizeColor,
   normalizeReportLink,
+  normalizeReportReason,
+  REPORT_REASONS,
   formatUrl,
   formatColor,
   formatSlug,
@@ -15,11 +21,22 @@ import {
   httpsUrl,
   destinationUrl,
   MAX_BYTES,
+  MAX_CARDS,
+  PAGE_COLORS,
+  cardComponents,
+  seoMetadata,
 } from './model.mjs';
-import { createComposer, renderComponent, fieldValidator, autoFormatField } from './components.mjs';
+import {
+  createComposer,
+  renderComponent,
+  fieldValidator,
+  autoFormatField,
+  collapseDragZone,
+} from './components.mjs';
 import { importCardJson, messageJson, linkedEmbedCode } from './interchange.mjs';
 import { icon, mountIcons } from './icons.mjs';
 import Coloris from './vendor/coloris.mjs';
+import Sortable from './vendor/sortable.mjs';
 
 const $ = (selector) => document.querySelector(selector);
 const siteHeader = $('.site-header');
@@ -44,6 +61,38 @@ const fields = {
   color: $('#color'),
   slug: $('#slug'),
 };
+const seoFields = { title: $('#seo-title'), image: $('#seo-image'), favicon: $('#seo-favicon') };
+const pageColorFields = {};
+for (const [mode, palette] of Object.entries(PAGE_COLORS)) {
+  pageColorFields[mode] = {};
+  for (const name of ['background', 'text', 'card', 'links', 'button', 'button_text']) {
+    const value = palette[name];
+    const label = element(
+      'label',
+      name === 'button_text' ? 'button text' : name === 'button' ? 'button background' : name,
+    );
+    const input = element('input');
+    input.type = 'text';
+    input.id = 'page-' + mode + '-' + name;
+    input.className = 'page-palette-color';
+    input.value = value;
+    input.maxLength = 7;
+    input.spellcheck = false;
+    input.dataset.coloris = '';
+    input.setAttribute('aria-label', mode + ' mode ' + name);
+    autoFormatField(input, formatColor);
+    const swatch = element('div', undefined, 'clr-field');
+    const button = element('button');
+    button.type = 'button';
+    button.setAttribute('aria-label', 'choose ' + mode + ' ' + name);
+    swatch.style.color = value;
+    swatch.append(button, input);
+    label.htmlFor = input.id;
+    label.append(swatch);
+    $('[data-palette="' + mode + '"]').append(label);
+    pageColorFields[mode][name] = input;
+  }
+}
 let loading = false,
   jsonDirty = false,
   jsonEditor;
@@ -54,8 +103,15 @@ let editing = null,
   dirty = false,
   slugEdited = false,
   showErrors = false,
-  usingTemplate = true;
+  usingTemplate = true,
+  sponsored = false;
 let restoring = true;
+let pageCards = [composer.get()],
+  activeCard = 0,
+  expandedCard = 0,
+  embedCard = null,
+  pageTools = false,
+  previewMode = 'discord';
 let authenticated = false,
   newToken = '',
   busy = false,
@@ -69,7 +125,7 @@ const mobile = matchMedia('(max-width: 760px)');
 let mobileTab = 'edit';
 Coloris.init();
 Coloris({
-  el: '#color',
+  el: '#color, .page-palette-color',
   format: 'hex',
   alpha: false,
   themeMode: 'auto',
@@ -90,6 +146,16 @@ Coloris({
 });
 const fieldChecks = [
   fieldValidator(
+    seoFields.favicon,
+    (value) => (value.trim() ? httpsUrl(value.trim(), 'favicon url') : null),
+    'favicon url',
+  ),
+  ...Object.entries(pageColorFields).flatMap(([mode, palette]) =>
+    Object.entries(palette).map(([name, input]) =>
+      fieldValidator(input, normalizeColor, mode + ' ' + name),
+    ),
+  ),
+  fieldValidator(
     fields.url,
     (value) => destinationUrl(value.trim(), cardUrl(fields.slug.value)),
     'destination url',
@@ -102,12 +168,23 @@ const fieldChecks = [
     'fallback description',
   ),
   fieldValidator(
+    seoFields.title,
+    (value) => validateText(value, 'preview title', 256),
+    'preview title',
+  ),
+  fieldValidator(
+    seoFields.image,
+    (value) => (value.trim() ? httpsUrl(value.trim(), 'preview image') : null),
+    'preview image',
+  ),
+  fieldValidator(
     fields.color,
     (value) => normalizeColor($('#no-accent').checked ? null : value),
     'accent color',
   ),
 ];
-for (const input of [fields.url, $('#url-import-value')]) autoFormatField(input, formatUrl);
+for (const input of [fields.url, seoFields.image, seoFields.favicon, $('#url-import-value')])
+  autoFormatField(input, formatUrl);
 autoFormatField(fields.color, formatColor);
 autoFormatField(fields.slug, formatSlug);
 const publicOrigin = new URL($('meta[property="og:url"]')?.content || location.origin).origin;
@@ -251,13 +328,62 @@ function slugify(value) {
 }
 
 function draft() {
+  pageCards[activeCard] = composer.get();
+  const seo = Object.fromEntries(
+    Object.entries(seoFields)
+      .map(([name, input]) => [name, input.value.trim()])
+      .filter(([, value]) => value),
+  );
+  const pageColors = {};
+  for (const [mode, palette] of Object.entries(pageColorFields)) {
+    const overrides = Object.fromEntries(
+      Object.entries(palette)
+        .filter(([name, input]) => input.value !== PAGE_COLORS[mode][name])
+        .map(([name, input]) => [name, input.value]),
+    );
+    if (Object.keys(overrides).length) pageColors[mode] = overrides;
+  }
+  const previewCard =
+    pageCards[
+      selectedEmbedIndex({
+        component: pageCards[0],
+        additional_cards: pageCards.slice(1),
+        embed_card: embedCard,
+      })
+    ];
   return {
     title: fields.title.value.trim(),
     description: fields.description.value.trim(),
     url: fields.url.value.trim() || null,
-    color: $('#no-accent').checked ? null : fields.color.value,
-    component: composer.get(),
+    color:
+      previewCard?.accent_color == null
+        ? null
+        : '#' + previewCard.accent_color.toString(16).padStart(6, '0'),
+    component: pageCards[0],
+    ...(!$('#show-sponsor').checked ? { sponsor_hidden: true } : {}),
+    ...($('#page-theme').value !== 'auto' ? { page_theme: $('#page-theme').value } : {}),
+    ...($('#page-color-scheme').value !== 'auto'
+      ? { page_color_scheme: $('#page-color-scheme').value }
+      : {}),
+    ...(Object.keys(pageColors).length ? { page_colors: pageColors } : {}),
+    ...(pageCards.length > 1 ? { additional_cards: pageCards.slice(1) } : {}),
+    ...(embedCard !== null ? { embed_card: embedCard } : {}),
+    ...(Object.keys(seo).length ? { seo } : {}),
   };
+}
+
+function selectPageCard(index, save = true, expand = true) {
+  if (save) pageCards[activeCard] = composer.get();
+  activeCard = index;
+  expandedCard = expand ? index : null;
+  loading = true;
+  const component = pageCards[index];
+  fields.color.value = '#' + (component.accent_color ?? 0x5865f2).toString(16).padStart(6, '0');
+  $('#no-accent').checked = component.accent_color == null;
+  $('#card-spoiler').checked = !!component.spoiler;
+  composer.set(component);
+  loading = false;
+  update();
 }
 
 function saveEditor() {
@@ -270,6 +396,11 @@ function saveEditor() {
         tab: mobileTab,
         scroll: scrollY,
         embedMode: $('#embed-mode').value,
+        previewMode,
+        activeCard,
+        expandedCard,
+        pageTools,
+        sponsored,
         showErrors,
         draft: !usingTemplate
           ? {
@@ -303,8 +434,20 @@ function restoreEditor() {
     if (saved) {
       if (
         !saved.card ||
-        saved.card.component?.type !== 17 ||
-        !Array.isArray(saved.card.component.components) ||
+        !(
+          (saved.card.component?.type === 17 && Array.isArray(saved.card.component.components)) ||
+          (isBadgeCase(saved.card.component) && Array.isArray(saved.card.component.badges))
+        ) ||
+        (saved.card.additional_cards !== undefined &&
+          (!Array.isArray(saved.card.additional_cards) ||
+            saved.card.additional_cards.length > 9 ||
+            saved.card.additional_cards.some(
+              (card) =>
+                !(
+                  (card?.type === 17 && Array.isArray(card.components)) ||
+                  (isBadgeCase(card) && Array.isArray(card.badges))
+                ),
+            ))) ||
         !['url', 'title', 'description'].every((key) => typeof saved.card[key] === 'string') ||
         typeof saved.slug !== 'string' ||
         typeof saved.color !== 'string' ||
@@ -313,6 +456,12 @@ function restoreEditor() {
         return null;
       usingTemplate = false;
       fill(saved.card, saved.slug);
+      if (
+        Number.isInteger(state.activeCard) &&
+        state.activeCard >= 0 &&
+        state.activeCard < pageCards.length
+      )
+        selectPageCard(state.activeCard);
       fields.color.value = saved.color;
       editing = saved.editing;
       dirty = !!saved.dirty;
@@ -322,7 +471,11 @@ function restoreEditor() {
         $('#component-json').value = saved.json;
       }
     }
+    if (state.expandedCard === null) expandedCard = null;
+    pageTools = state.pageTools === undefined ? pageCards.length > 1 : !!state.pageTools;
     showErrors = !!state.showErrors;
+    sponsored = !!state.sponsored;
+    previewMode = state.previewMode === 'page' ? 'page' : 'discord';
     $('#embed-mode').value = state.embedMode === 'live' ? 'live' : 'snapshot';
     update();
     return state;
@@ -334,17 +487,97 @@ function restoreEditor() {
 
 function update() {
   const card = draft();
+  const roots = cardComponents(card);
+  const current = roots[activeCard];
+  const multiple = roots.length > 1;
+  const pagePreview = previewMode === 'page' && (!card.url || pageTools);
   $('#delete-card').hidden = !editing;
-  renderComponent($('#preview-card'), card.component);
-  const stats = componentStats(card.component);
-  $('#component-count').textContent = stats.components + ' / 40 · ' + stats.media + ' / 10 media';
+  $('#perk-management').hidden = !sponsored;
+  const previewRoot = buildEmbed(card).component;
+  renderComponent($('#preview-card'), previewRoot);
+  $('#enable-page-tools').checked = pageTools;
+  $('#page-management-controls').hidden = !pageTools;
+  $('#page-link-warning').hidden = !card.url;
+  $('.page-appearance').hidden = !pageTools;
+  $('#reset-page-appearance').disabled =
+    busy || !(card.page_theme || card.page_colors || card.page_color_scheme);
+  for (const mode of ['light', 'dark'])
+    $('[data-palette="' + mode + '"]').closest('fieldset').hidden =
+      !!card.page_color_scheme && card.page_color_scheme !== mode;
+  fields.url.disabled = busy;
+  $('#destination-hint').textContent = 'leave blank to keep visitors on this page.';
+  $('#page-card-actions').hidden = !pageTools;
+  $('#add-page-card').hidden = !pageTools;
+  for (const button of ['#add-page-card', '#add-badge-case'])
+    $(button).disabled = busy || jsonDirty || roots.length >= MAX_CARDS;
+  for (const selector of ['.add-component-heading', '.add-component', '.templates'])
+    $('#page-card-fields ' + selector).hidden = isBadgeCase(current);
+  $('#preview-scope').hidden = !!card.url && !pageTools;
+  $('#discord-preview-message').hidden = pagePreview;
+  $('#page-preview-cards').hidden = !pagePreview;
+  $('.discord-window').classList.toggle('is-page-preview', pagePreview);
+  $('#preview-heading').textContent = pagePreview ? 'your page' : 'showcase';
+  document.querySelectorAll('[data-preview-mode]').forEach((button) => {
+    button.setAttribute(
+      'aria-pressed',
+      String(button.dataset.previewMode === (pagePreview ? 'page' : 'discord')),
+    );
+  });
+  if (pagePreview) {
+    $('#page-preview-cards').replaceChildren(
+      ...roots.map((root) => {
+        const preview = element('article', undefined, 'discord-card');
+        renderComponent(preview, root);
+        return preview;
+      }),
+    );
+  }
+  syncPagePreview(card, pagePreview);
+  renderCardEditors();
+  for (const [mode, palette] of Object.entries(pageColorFields))
+    for (const [name, input] of Object.entries(palette))
+      input.parentElement.style.color = /^#[0-9a-f]{6}$/i.test(input.value)
+        ? input.value
+        : PAGE_COLORS[mode][name];
+  const metadata = seoMetadata(card);
+  seoFields.title.placeholder = card.title || 'use card name';
+  const generatedMetadata = seoMetadata({ ...card, seo: undefined, description: '' });
+  fields.description.placeholder = generatedMetadata.description || 'use preview card text';
+  seoFields.image.placeholder = generatedMetadata.image || 'use preview card image';
+  $('#reset-seo').disabled =
+    busy || !(Object.values(seoFields).some((input) => input.value) || fields.description.value);
+  $('#seo-preview-title').textContent = metadata.title || 'your page';
+  $('#seo-preview-description').textContent = metadata.description;
+  $('#seo-preview-host').textContent = publicHost + '/' + (fields.slug.value || 'your-card');
+  const previewImage = $('#seo-preview-image');
+  previewImage.hidden = !metadata.image;
+  if (metadata.image && previewImage.getAttribute('src') !== metadata.image)
+    previewImage.src = metadata.image;
+  if (!metadata.image) previewImage.removeAttribute('src');
+  const favicon = $('#seo-preview-icon');
+  favicon.hidden = !card.seo?.favicon;
+  if (card.seo?.favicon && favicon.getAttribute('src') !== card.seo.favicon)
+    favicon.src = card.seo.favicon;
+  if (!card.seo?.favicon) favicon.removeAttribute('src');
+  const stats = componentStats(current);
+  $('#page-card-fields .content-heading h3').textContent = 'content';
+  $('#component-count').textContent = isBadgeCase(current)
+    ? current.badges.length + ' / ' + MAX_BADGES + ' badges'
+    : (multiple ? 'card ' + (activeCard + 1) + ' · ' : '') +
+      stats.components +
+      ' / 40 · ' +
+      stats.media +
+      ' / 10 media';
   $('#add-component').disabled = busy || stats.components >= 40;
   $('#preview-url').textContent = publicHost + '/' + (fields.slug.value || 'your-card');
   $('#slug-prefix').textContent = publicHost + '/';
   $('#slug-hint').textContent =
     editing && fields.slug.value !== editing ? 'old link stops working after save.' : '';
-  const bytes = payloadBytes(card);
-  $('#byte-count').textContent = bytes.toLocaleString() + ' / 3,000 bytes';
+  const bytes = payloadBytes({
+    component: pagePreview && !isBadgeCase(current) ? current : previewRoot,
+  });
+  $('#byte-count').textContent =
+    pagePreview && isBadgeCase(current) ? 'page only' : bytes.toLocaleString() + ' / 3,000 bytes';
   $('#byte-count').classList.toggle('over-limit', bytes > MAX_BYTES);
   const errors = validateEditor(card);
   $('#publish-button').disabled = busy || jsonDirty;
@@ -386,7 +619,19 @@ function update() {
   $('#copy-route').disabled = busy || !embedReady;
   $('#copy-prompt').disabled = busy || !embedReady;
   if (!jsonDirty) {
-    const value = JSON.stringify({ component: card.component }, null, 2);
+    const value = JSON.stringify(
+      {
+        component: card.component,
+        ...(card.additional_cards ? { additional_cards: card.additional_cards } : {}),
+        ...(card.embed_card !== undefined ? { embed_card: card.embed_card } : {}),
+        ...(card.seo ? { seo: card.seo } : {}),
+        ...(card.page_theme ? { page_theme: card.page_theme } : {}),
+        ...(card.page_colors ? { page_colors: card.page_colors } : {}),
+        ...(card.page_color_scheme ? { page_color_scheme: card.page_color_scheme } : {}),
+      },
+      null,
+      2,
+    );
     $('#component-json').value = value;
     jsonEditor?.set(value);
   }
@@ -419,21 +664,30 @@ function validateEditor(card = draft()) {
   const componentErrors = composer.validate(showErrors);
   const errors = [
     ...fieldChecks.map((check) => check(showErrors)).filter(Boolean),
-    ...componentErrors,
+    ...componentErrors.map((error) => ({
+      ...error,
+      label: pageCards.length > 1 ? 'card ' + (activeCard + 1) + ', ' + error.label : error.label,
+    })),
   ];
-  if (!componentErrors.length) {
+  const roots = cardComponents(card);
+  roots.forEach((component, index) => {
+    if (index === activeCard && componentErrors.length) return;
     try {
-      normalizeComponent(card.component);
+      normalizePageCard(component);
     } catch (invalid) {
-      errors.push({ message: invalid.message });
+      errors.push({
+        message: invalid.message,
+        ...(roots.length > 1 ? { label: 'card ' + (index + 1), cardIndex: index } : {}),
+      });
     }
-  }
-  const stats = componentStats(card.component);
+  });
+  if (roots.length > MAX_CARDS) errors.push({ message: `use up to ${MAX_CARDS} cards per page.` });
+  const stats = componentStats(roots[activeCard]);
   for (const [invalid, message] of [
     [stats.components > 40, 'use up to 40 components.'],
     [stats.media > 10, 'use up to ten gallery items across the embed.'],
     [
-      payloadBytes(card) > MAX_BYTES,
+      !isBadgeCase(roots[activeCard]) && payloadBytes({ component: roots[activeCard] }) > MAX_BYTES,
       'card exceeds discord’s 3,000-byte limit. shorten text or remove a link or image.',
     ],
   ]) {
@@ -442,14 +696,22 @@ function validateEditor(card = draft()) {
   if (jsonDirty) errors.push({ message: 'apply json before publishing.' });
   const visibleErrors = showErrors ? errors : [];
   $('#validation-list').replaceChildren(
-    ...visibleErrors.map(({ input, label, message }) => {
+    ...visibleErrors.map(({ input, label, message, cardIndex }) => {
       const row = element('li');
-      const link = element(input ? 'a' : 'span', label ? label + ': ' + message : message);
-      if (input) {
-        link.href = '#' + input.id;
+      const link = element(
+        input || cardIndex !== undefined ? 'a' : 'span',
+        label ? label + ': ' + message : message,
+      );
+      if (input || cardIndex !== undefined) {
+        link.href = '#' + (input?.id || 'page-card-fields');
         link.addEventListener('click', (event) => {
           event.preventDefault();
           setTab('edit');
+          if (cardIndex !== undefined) {
+            selectPageCard(cardIndex);
+            $('#page-card-editors [data-index="' + cardIndex + '"] [data-action="toggle"]').focus();
+            return;
+          }
           for (let parent = input.parentElement; parent; parent = parent.parentElement) {
             if (parent.tagName === 'DETAILS') parent.open = true;
             if (parent.matches('.component-editor[data-collapsed]'))
@@ -481,8 +743,29 @@ function changed() {
 
 function fill(card, slug = '') {
   loading = true;
+  sponsored = card.sponsored === true;
+  $('#show-sponsor').checked = !card.sponsor_hidden;
   for (const name of ['url', 'title', 'description']) fields[name].value = card[name] ?? '';
-  const component = buildEmbed({ images: [], buttons: [], ...card }).component;
+  for (const [name, input] of Object.entries(seoFields)) input.value = card.seo?.[name] ?? '';
+  $('#page-theme').value = card.page_theme || 'auto';
+  $('#page-color-scheme').value = card.page_color_scheme || 'auto';
+  for (const [mode, palette] of Object.entries(pageColorFields))
+    for (const [name, input] of Object.entries(palette))
+      input.value = card.page_colors?.[mode]?.[name] || PAGE_COLORS[mode][name];
+  const component = cardComponents({ images: [], buttons: [], ...card })[0];
+  pageCards = cardComponents({ images: [], buttons: [], ...card });
+  embedCard =
+    Number.isInteger(card.embed_card) &&
+    card.embed_card >= 0 &&
+    card.embed_card < pageCards.length &&
+    !isBadgeCase(pageCards[card.embed_card])
+      ? card.embed_card
+      : null;
+  activeCard = 0;
+  expandedCard = 0;
+  pageTools =
+    pageCards.length > 1 || !!card.page_theme || !!card.page_colors || !!card.page_color_scheme;
+  previewMode = pageCards.length > 1 ? 'page' : 'discord';
   fields.color.value = '#' + (component.accent_color ?? 0x5865f2).toString(16).padStart(6, '0');
   $('#no-accent').checked = component.accent_color == null;
   $('#card-spoiler').checked = !!component.spoiler;
@@ -555,6 +838,10 @@ async function refreshCards() {
     const cards = await api('/api/cards');
     if (version !== refreshVersion) return;
     authenticated = session.authenticated;
+    if (editing) {
+      sponsored = cards.find((card) => card.slug === editing)?.sponsored === true;
+      update();
+    }
     syncAccount();
     $('#card-count').textContent = cards.length;
     $('#saved-list').replaceChildren(
@@ -577,7 +864,7 @@ async function refreshCards() {
         remove.setAttribute('aria-label', 'delete card: ' + card.title);
         remove.addEventListener('click', () => deleteCard(card.slug, $('#account-error')));
         const url = element('a', undefined, 'saved-url');
-        url.append(element('span', location.host + '/' + card.slug, 'saved-url-label'));
+        url.append(element('span', '/' + card.slug, 'saved-url-label'));
         url.href = cardUrl(card.slug);
         url.target = '_blank';
         url.rel = 'noopener noreferrer';
@@ -591,7 +878,24 @@ async function refreshCards() {
         copyLink.title = 'copy link';
         copyLink.setAttribute('aria-label', 'copy link: ' + card.title);
         copyLink.addEventListener('click', () => copy(cardUrl(card.slug)));
-        footer.append(url, copyLink, remove);
+        const link = element('div', undefined, 'saved-link');
+        link.append(url);
+        for (const badge of card.badges || []) {
+          const tag = element('span', undefined, 'saved-badge');
+          tag.title = badge.name;
+          tag.setAttribute('role', 'img');
+          tag.setAttribute('aria-label', badge.name);
+          if (badge.image) {
+            const image = element('img');
+            image.src = badge.image;
+            image.alt = '';
+            image.width = image.height = 16;
+            image.referrerPolicy = 'no-referrer';
+            tag.append(image);
+          } else tag.append(icon(badge.icon));
+          link.append(tag);
+        }
+        footer.append(link, copyLink, remove);
         tile.append(open, footer);
         return tile;
       }),
@@ -754,12 +1058,22 @@ $('#delete-card').addEventListener('click', () => {
 });
 for (const type of ['focusin', 'click', 'input', 'change'])
   $('#card-form').addEventListener(type, (event) => {
-    if (loading || showErrors || event.target.closest('#editor-notice, #reset')) return;
+    if (
+      loading ||
+      showErrors ||
+      event.target.closest('#editor-notice, #reset, #enable-page-tools, #page-management-controls')
+    )
+      return;
     showErrors = true;
     update();
   });
 $('#card-form').addEventListener('input', (event) => {
-  if (event.target.closest('#component-list, .json-panel')) return;
+  if (
+    event.target.closest(
+      '#component-list, .json-panel, #page-management-controls, #enable-page-tools, .page-appearance',
+    )
+  )
+    return;
   if (event.target === fields.slug) slugEdited = true;
   if (event.target === fields.title && !editing && !slugEdited)
     fields.slug.value = slugify(fields.title.value);
@@ -771,6 +1085,228 @@ $('#card-form').addEventListener('input', (event) => {
     else changed();
   } else if (event.target.id === 'card-spoiler') composer.spoiler(event.target.checked);
   else changed();
+});
+$('.page-appearance').addEventListener('input', changed);
+$('#page-theme').addEventListener('change', changed);
+$('#page-color-scheme').addEventListener('change', changed);
+$('#reset-page-appearance').addEventListener('click', () => {
+  if (busy) return;
+  $('#page-theme').value = 'auto';
+  $('#page-color-scheme').value = 'auto';
+  for (const [mode, palette] of Object.entries(pageColorFields))
+    for (const [name, input] of Object.entries(palette)) input.value = PAGE_COLORS[mode][name];
+  changed();
+});
+$('#reset-seo').addEventListener('click', () => {
+  if (busy) return;
+  for (const input of Object.values(seoFields)) input.value = '';
+  fields.description.value = '';
+  changed();
+});
+$('#enable-page-tools').addEventListener('change', (event) => {
+  pageTools = event.target.checked;
+  update();
+});
+$('#add-badge-case').addEventListener('click', () => {
+  if (busy || jsonDirty || pageCards.length >= MAX_CARDS) return;
+  draft();
+  pageCards.push({ type: 'badge_case', title: 'badge case', badges: [{ image: '' }] });
+  previewMode = 'page';
+  selectPageCard(pageCards.length - 1, false);
+  changed();
+  $('#component-list input[type="url"]')?.focus({ preventScroll: true });
+});
+$('#add-page-card').addEventListener('click', () => {
+  if (busy || jsonDirty || pageCards.length >= MAX_CARDS) return;
+  draft();
+  pageCards.push({
+    type: 17,
+    accent_color: pageCards[activeCard].accent_color ?? null,
+    components: [{ type: 10, content: '## new card' }],
+  });
+  previewMode = 'page';
+  selectPageCard(pageCards.length - 1, false);
+  changed();
+  $('#component-list textarea')?.focus({ preventScroll: true });
+});
+function movePageCard(from, to) {
+  if (busy || jsonDirty || from === to || to < 0 || to >= pageCards.length) return;
+  draft();
+  const active = pageCards[activeCard];
+  const chosen = embedCard === null ? null : pageCards[embedCard];
+  pageCards.splice(to, 0, pageCards.splice(from, 1)[0]);
+  embedCard = chosen ? pageCards.indexOf(chosen) : null;
+  selectPageCard(pageCards.indexOf(active), false, expandedCard !== null);
+  changed();
+  $('#cards-status').textContent = 'moved to position ' + (to + 1) + '.';
+}
+function duplicatePageCard(index) {
+  if (busy || jsonDirty || pageCards.length >= MAX_CARDS) return;
+  draft();
+  pageCards.splice(index + 1, 0, structuredClone(pageCards[index]));
+  if (embedCard !== null && embedCard > index) embedCard++;
+  previewMode = 'page';
+  selectPageCard(index + 1, false);
+  changed();
+}
+async function removePageCard(index) {
+  if (
+    busy ||
+    jsonDirty ||
+    pageCards.length < 2 ||
+    (!isBadgeCase(pageCards[index]) &&
+      pageCards.filter((card) => !isBadgeCase(card)).length === 1) ||
+    !(await confirmAction('remove card ' + (index + 1) + '?', 'remove card'))
+  )
+    return;
+  draft();
+  pageCards.splice(index, 1);
+  if (embedCard === index) embedCard = null;
+  else if (embedCard !== null && embedCard > index) embedCard--;
+  const next = activeCard > index ? activeCard - 1 : Math.min(activeCard, pageCards.length - 1);
+  selectPageCard(next, false);
+  changed();
+}
+function cardLabel(root, index) {
+  if (isBadgeCase(root)) return (root.title || 'badge case') + ' · page only';
+  return (
+    root.components
+      .flatMap((block) => (block.type === 9 ? block.components : [block]))
+      .find((block) => block.type === 10)
+      ?.content.split('\n')[0]
+      .replace(/^#+\s*/, '')
+      .slice(0, 80) || 'card ' + (index + 1)
+  );
+}
+function renderCardEditors() {
+  const list = $('#page-card-editors');
+  const fields = $('#page-card-fields');
+  const choice = $('#embed-card-choice');
+  pageCards.forEach((root, index) => {
+    let card = list.querySelector(':scope > [data-index="' + index + '"]');
+    if (!card) {
+      card =
+        index === 0
+          ? list.firstElementChild
+          : element('section', undefined, 'form-section card-editor');
+      card.dataset.index = index;
+      card.querySelector(':scope > .card-titlebar')?.remove();
+      const header = element('div', undefined, 'card-titlebar page-card-header');
+      const action = (name, label, run, cls = 'text-button') => {
+        const button = element('button', undefined, cls);
+        button.type = 'button';
+        button.append(icon(name));
+        button.dataset.action = name;
+        button.setAttribute('aria-label', label + ' card ' + (index + 1));
+        button.title = label + ' card ' + (index + 1);
+        button.addEventListener('click', run);
+        return button;
+      };
+      const grip = action('grip-vertical', 'reorder', () => {}, 'drag-handle card-handle');
+      grip.title = 'drag to reorder; use up and down arrow keys';
+      grip.addEventListener('keydown', (event) => {
+        if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        const to =
+          event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? pageCards.length - 1
+              : index + (event.key === 'ArrowUp' ? -1 : 1);
+        movePageCard(index, to);
+        list.children[Math.max(0, Math.min(to, pageCards.length - 1))]
+          ?.querySelector('.card-handle')
+          .focus();
+      });
+      const heading = element('h2', undefined, 'block-title');
+      heading.id = 'page-card-heading-' + index;
+      const toggle = element('button', undefined, 'block-toggle');
+      toggle.type = 'button';
+      toggle.dataset.action = 'toggle';
+      toggle.setAttribute('aria-controls', 'page-card-body-' + index);
+      toggle.append(element('span', undefined, 'page-card-name'), icon('chevron-down'));
+      toggle.addEventListener('click', () => {
+        if (busy || jsonDirty) return;
+        if (expandedCard === index) {
+          expandedCard = null;
+          update();
+        } else selectPageCard(index);
+      });
+      heading.append(toggle);
+      const actions = element('div', undefined, 'block-actions');
+      actions.append(
+        action('arrow-up', 'move up', () => movePageCard(index, index - 1)),
+        action('arrow-down', 'move down', () => movePageCard(index, index + 1)),
+        action('copy', 'duplicate', () => duplicatePageCard(index)),
+        action('trash-2', 'remove', () => removePageCard(index)),
+      );
+      header.append(grip, heading, actions);
+      const body = element('div', undefined, 'page-card-body');
+      body.id = 'page-card-body-' + index;
+      card.prepend(header);
+      card.append(body);
+      card.setAttribute('aria-labelledby', heading.id);
+    }
+    if (list.children[index] !== card) list.insertBefore(card, list.children[index] || null);
+    const open = expandedCard === index;
+    card.toggleAttribute('data-collapsed', !open);
+    card.querySelector('.page-card-body').hidden = !open;
+    card.querySelector('[data-action="toggle"]').setAttribute('aria-expanded', String(open));
+    card.querySelector('[data-action="toggle"]').disabled = busy || jsonDirty;
+    const label = 'card ' + (index + 1) + ' · ' + cardLabel(root, index);
+    card.querySelector('.page-card-name').textContent = label;
+    card.querySelector('.page-card-name').title = label;
+    card.querySelector('.card-handle').hidden = !pageTools;
+    card.querySelector('.card-handle').disabled = busy || jsonDirty || pageCards.length < 2;
+    card.querySelector('.block-actions').hidden = !pageTools;
+    for (const [name, disabled] of [
+      ['arrow-up', index === 0],
+      ['arrow-down', index === pageCards.length - 1],
+      ['copy', pageCards.length >= MAX_CARDS],
+      [
+        'trash-2',
+        pageCards.length < 2 ||
+          (!isBadgeCase(root) && pageCards.filter((card) => !isBadgeCase(card)).length === 1),
+      ],
+    ])
+      card.querySelector('[data-action="' + name + '"]').disabled = busy || jsonDirty || disabled;
+    if (index === activeCard && fields.parentElement !== card.querySelector('.page-card-body'))
+      card.querySelector('.page-card-body').append(fields);
+  });
+  while (list.children.length > pageCards.length) list.lastElementChild.remove();
+  const first = pageCards.findIndex((card) => !isBadgeCase(card));
+  choice.replaceChildren(
+    new Option(first > 0 ? 'automatic · card ' + (first + 1) : 'automatic · first card', 'auto'),
+  );
+  pageCards.forEach((root, index) => {
+    if (!isBadgeCase(root))
+      choice.add(new Option('card ' + (index + 1) + ' · ' + cardLabel(root, index), String(index)));
+  });
+  choice.value = embedCard === null ? 'auto' : String(embedCard);
+  choice.disabled = busy || jsonDirty;
+  fields.setAttribute('aria-labelledby', 'page-card-heading-' + activeCard);
+}
+$('#embed-card-choice').addEventListener('change', (event) => {
+  embedCard = event.target.value === 'auto' ? null : Number(event.target.value);
+  changed();
+});
+new Sortable($('#page-card-editors'), {
+  draggable: '.card-editor',
+  handle: '.card-handle',
+  ...collapseDragZone($('#page-card-editors'), '.card-editor'),
+  animation: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 91,
+  ghostClass: 'reorder-placeholder',
+  chosenClass: 'reorder-chosen',
+  forceFallback: true,
+  fallbackTolerance: 4,
+  onEnd: ({ oldIndex, newIndex }) => movePageCard(oldIndex, newIndex),
+});
+
+document.querySelectorAll('[data-preview-mode]').forEach((button) => {
+  button.addEventListener('click', () => {
+    previewMode = button.dataset.previewMode;
+    update();
+  });
 });
 $('#add-component').addEventListener('click', () => {
   if (busy) return;
@@ -791,7 +1327,16 @@ $('#component-json').addEventListener('input', jsonChanged);
 function applyJson(value) {
   const imported = importCardJson(value);
   fill(
-    { ...draft(), ...imported },
+    {
+      ...draft(),
+      ...imported,
+      additional_cards: imported.additional_cards || [],
+      embed_card: imported.embed_card ?? null,
+      seo: imported.seo ?? null,
+      page_theme: imported.page_theme,
+      page_colors: imported.page_colors,
+      page_color_scheme: imported.page_color_scheme,
+    },
     editing || (slugEdited ? fields.slug.value : slugify(imported.title || fields.title.value)),
   );
   changed();
@@ -862,7 +1407,15 @@ function exportJson(action) {
   closeMenus();
   try {
     const card = jsonDirty ? importCardJson($('#component-json').value) : draft();
-    action(messageJson(card));
+    action(
+      card.additional_cards?.length ||
+        card.seo ||
+        card.page_theme ||
+        card.page_colors ||
+        card.page_color_scheme
+        ? JSON.stringify(card, null, 2)
+        : messageJson(card),
+    );
     $('#json-error').textContent = '';
   } catch (error) {
     $('#form-status').textContent = error.message;
@@ -1170,7 +1723,7 @@ $('#copy-published-link').addEventListener('click', async () => {
 });
 $('#copy-code').addEventListener('click', () => {
   try {
-    normalizeComponent(composer.get());
+    normalizeComponent(buildEmbed(draft()).component);
     copy($('#embed-code').value);
   } catch (error) {
     $('#form-status').textContent = error.message;
@@ -1237,6 +1790,21 @@ const reportDialog = $('#report-dialog'),
   reportForm = $('#report-form'),
   reportUrl = $('#report-url'),
   reportConfirm = $('#report-confirm');
+const reportReason = $('#report-reason'),
+  reportDetails = $('#report-details');
+for (const reason of REPORT_REASONS) reportReason.add(new Option(reason, reason));
+function syncReportReason() {
+  const other = reportReason.value === 'other';
+  $('#report-details-field').hidden = !other;
+  reportDetails.required = other;
+  reportDetails.setCustomValidity('');
+  reportReason.setCustomValidity('');
+}
+reportReason.addEventListener('change', () => {
+  syncReportReason();
+  if (reportDetails.required) reportDetails.focus();
+});
+reportDetails.addEventListener('input', () => reportDetails.setCustomValidity(''));
 const checkReportUrl = fieldValidator(
   reportUrl,
   (value) => normalizeReportLink(value, location.origin),
@@ -1256,6 +1824,7 @@ $('#report-abuse').addEventListener('click', () => {
   closeMenus();
   reportForm.reset();
   reportUrl.value = editing ? cardUrl(editing) : '';
+  syncReportReason();
   $('#report-error').textContent = '';
   reportDialog.showModal();
   reportUrl.focus();
@@ -1267,7 +1836,8 @@ reportUrl.addEventListener('input', () => {
 reportConfirm.addEventListener('change', checkReportConfirmation);
 reportDialog.addEventListener('close', () => {
   reportForm.reset();
-  for (const input of [reportUrl, reportConfirm]) {
+  syncReportReason();
+  for (const input of [reportUrl, reportConfirm, reportReason, reportDetails]) {
     input.setCustomValidity('');
     input.removeAttribute('aria-invalid');
   }
@@ -1286,6 +1856,15 @@ reportForm.addEventListener('submit', async (event) => {
     (urlError ? reportUrl : reportConfirm).focus();
     return;
   }
+  let reason;
+  try {
+    reason = normalizeReportReason({ reason: reportReason.value, details: reportDetails.value });
+  } catch (error) {
+    const input = reportReason.value === 'other' ? reportDetails : reportReason;
+    input.setCustomValidity(error.message);
+    input.reportValidity();
+    return;
+  }
   setBusy(true);
   $('#send-report').textContent = 'sending…';
   $('#report-error').textContent = '';
@@ -1294,7 +1873,7 @@ reportForm.addEventListener('submit', async (event) => {
     const link = normalizeReportLink(reportUrl.value, location.origin);
     await api('/api/reports', {
       method: 'POST',
-      body: JSON.stringify({ url: link.url, confirmed: reportConfirm.checked }),
+      body: JSON.stringify({ url: link.url, confirmed: reportConfirm.checked, ...reason }),
     });
     sent = true;
   } catch (error) {
@@ -1419,11 +1998,49 @@ $('#theme-toggle').addEventListener('click', () => {
   } catch {}
 });
 
-function applyPreviewTheme(theme) {
-  $('.discord-window').dataset.previewTheme = theme;
+function syncPagePreview(card, pageMode) {
+  const theme = (pageMode && card.page_theme) || previewTheme || 'dark';
+  const preview = $('.discord-window');
+  preview.dataset.previewTheme = theme;
+  const scheme = card.page_color_scheme || theme;
+  const colors = pageMode
+    ? { ...(card.page_color_scheme ? PAGE_COLORS[scheme] : {}), ...card.page_colors?.[scheme] }
+    : {};
+  const values = {
+    '--preview-page-bg': colors.background,
+    '--discord-card': colors.card,
+    '--discord-text': colors.text,
+    '--discord-ink': colors.text,
+    '--discord-link': colors.links,
+    '--discord-button': colors.button,
+    '--discord-button-text': colors.button_text,
+    '--discord-button-hover':
+      colors.button &&
+      'color-mix(in srgb, ' +
+        colors.button +
+        ' 85%, ' +
+        (colors.button_text || colors.text || PAGE_COLORS[scheme].text) +
+        ')',
+    '--discord-border':
+      pageMode &&
+      'color-mix(in srgb, ' +
+        (colors.text || PAGE_COLORS[scheme].text) +
+        ' 25%, ' +
+        (colors.card || PAGE_COLORS[scheme].card) +
+        ')',
+    '--discord-muted': colors.text && 'color-mix(in srgb, ' + colors.text + ' 75%, transparent)',
+  };
+  for (const [name, value] of Object.entries(values))
+    if (value) preview.style.setProperty(name, value);
+    else preview.style.removeProperty(name);
   document.querySelectorAll('.preview-themes button').forEach((button) => {
     button.setAttribute('aria-pressed', String(button.dataset.previewTheme === theme));
+    button.disabled = !!(pageMode && card.page_theme);
   });
+}
+function applyPreviewTheme(theme) {
+  previewTheme = theme;
+  syncPagePreview(draft(), previewMode === 'page' && (!fields.url.value.trim() || pageTools));
 }
 let previewTheme;
 try {

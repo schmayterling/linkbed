@@ -60,20 +60,19 @@ export async function openDatabase({
     ],
     'write',
   );
-  for (const [table, column] of [
-    ['abuse_reports', 'reporter_fingerprint'],
-    ['creator_fingerprints', 'reporting_banned_at'],
+  for (const [table, column, type] of [
+    ['abuse_reports', 'reporter_fingerprint', 'TEXT'],
+    ['abuse_reports', 'reason', 'TEXT'],
+    ['abuse_reports', 'details', 'TEXT'],
+    ['creator_fingerprints', 'reporting_banned_at', 'INTEGER'],
+    ['cards', 'sponsored_at', 'INTEGER'],
+    ['cards', 'verified_at', 'INTEGER'],
+    ['cards', 'custom_badges', 'TEXT'],
   ]) {
     const columns = await db.execute('PRAGMA table_info(' + table + ')');
     if (!columns.rows.some((item) => item.name === column)) {
       try {
-        await db.execute(
-          'ALTER TABLE ' +
-            table +
-            ' ADD COLUMN ' +
-            column +
-            (column === 'reporter_fingerprint' ? ' TEXT' : ' INTEGER'),
-        );
+        await db.execute('ALTER TABLE ' + table + ' ADD COLUMN ' + column + ' ' + type);
       } catch (error) {
         if (!/duplicate column/i.test(error.message)) throw error;
       }

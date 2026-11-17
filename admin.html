@@ -297,6 +297,36 @@
         </button>
       </form>
     </dialog>
+    <dialog
+      id="admin-badge-dialog"
+      class="tool-dialog account-dialog"
+      aria-labelledby="admin-badge-heading"
+      closedby="any"
+    >
+      <div class="card-titlebar">
+        <h2 id="admin-badge-heading">custom badges</h2>
+        <button
+          type="button"
+          class="text-button"
+          data-close-badges
+          aria-label="close custom badges"
+        >
+          <span data-icon="x"></span>
+        </button>
+      </div>
+      <form id="admin-badge-form">
+        <p id="admin-badge-card" class="muted"></p>
+        <div id="admin-badge-list"></div>
+        <button type="button" id="admin-add-badge" class="button secondary small">
+          <span data-icon="plus"></span>add badge
+        </button>
+        <p id="admin-badge-error" class="form-status" role="status"></p>
+        <div class="dialog-actions">
+          <button type="button" class="button secondary small" data-close-badges>cancel</button>
+          <button type="submit" class="button primary small">save badges</button>
+        </div>
+      </form>
+    </dialog>
     <div id="admin-menu" class="toolbar-menu admin-menu" popover aria-label="row actions"></div>
   </body>
 </html>

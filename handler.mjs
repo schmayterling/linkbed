@@ -2,9 +2,12 @@ import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { openDatabase } from './database.mjs';
 import {
   normalizeCard,
+  normalizeCustomBadges,
+  pageBadges,
   normalizeSlug,
   normalizeReportLink,
-  buildEmbed,
+  normalizeReportReason,
+  cardComponents,
   componentUrls,
   payloadBytes,
   embedScript,
@@ -36,6 +39,16 @@ const json = (res, status, data) => {
   res.end(JSON.stringify(data));
 };
 
+function readCustomBadges(value) {
+  try {
+    const badges = normalizeCustomBadges(JSON.parse(value ?? 'null'));
+    for (const badge of badges) publicUrl(badge.image, 'badge image url');
+    return badges;
+  } catch {
+    return [];
+  }
+}
+
 export function isLocalAdminRequest(req, address) {
   const loopback = (address) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address);
   return (
@@ -50,7 +63,7 @@ export function isLocalAdminRequest(req, address) {
   );
 }
 
-async function body(req) {
+async function body(req, max = 16384) {
   if (!req.headers['content-type']?.startsWith('application/json')) throw fail(415, 'send json.');
   let value = req.body;
   if (value === undefined) {
@@ -58,7 +71,7 @@ async function body(req) {
     const chunks = [];
     for await (const chunk of req) {
       size += chunk.length;
-      if (size > 16384) throw fail(413, 'request is too large.');
+      if (size > max) throw fail(413, 'request is too large.');
       chunks.push(chunk);
     }
     try {
@@ -67,7 +80,7 @@ async function body(req) {
       throw fail(400, 'invalid json.');
     }
   }
-  if (Buffer.byteLength(JSON.stringify(value)) > 16384) throw fail(413, 'request is too large.');
+  if (Buffer.byteLength(JSON.stringify(value)) > max) throw fail(413, 'request is too large.');
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw fail(400, 'invalid json object.');
   return value;
@@ -300,15 +313,25 @@ export function createHandler(options = {}) {
         if (input.confirmed !== true)
           throw fail(400, 'confirm that this link contains abusive content.');
         const link = normalizeReportLink(input.url, canonical);
+        const { reason, details } = normalizeReportReason(input);
         const current = await session(db, req);
         if (current) await linkOwner(db, current.owner, visitor, true);
         const guard = fingerprintGuard(visitor, true);
         const result = await db.execute({
           sql:
-            'INSERT INTO abuse_reports (slug, url, created_at, reporter_fingerprint) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM cards WHERE slug = ?) AND ' +
+            'INSERT INTO abuse_reports (slug, url, reason, details, created_at, reporter_fingerprint) SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM cards WHERE slug = ?) AND ' +
             guard.sql +
             ' RETURNING id',
-          args: [link.slug, link.url, Date.now(), visitor.fingerprint, link.slug, ...guard.args],
+          args: [
+            link.slug,
+            link.url,
+            reason,
+            details,
+            Date.now(),
+            visitor.fingerprint,
+            link.slug,
+            ...guard.args,
+          ],
         });
         if (!result.rows.length)
           throw fail(404, 'that link could not be found or reporting is unavailable.');
@@ -325,18 +348,20 @@ export function createHandler(options = {}) {
           const result = await db.execute(
             reports
               ? {
-                  sql: "SELECT r.id, r.slug, r.url, r.created_at, r.reporter_fingerprint, json_extract(c.card, '$.title') AS title, c.creator_fingerprint, c.slug IS NULL AS removed, (SELECT token_hash FROM accounts WHERE token_hash = c.owner AND revoked_at IS NULL) AS token_hash, EXISTS (SELECT 1 FROM banned_slugs WHERE slug = r.slug) AS banned FROM abuse_reports r LEFT JOIN cards c ON c.slug = r.slug WHERE r.resolved_at IS NULL ORDER BY r.created_at, r.id LIMIT 51 OFFSET ?",
+                  sql: "SELECT r.id, r.slug, r.url, r.reason, r.details, r.created_at, r.reporter_fingerprint, json_extract(c.card, '$.title') AS title, c.creator_fingerprint, c.slug IS NULL AS removed, (SELECT token_hash FROM accounts WHERE token_hash = c.owner AND revoked_at IS NULL) AS token_hash, EXISTS (SELECT 1 FROM banned_slugs WHERE slug = r.slug) AS banned FROM abuse_reports r LEFT JOIN cards c ON c.slug = r.slug WHERE r.resolved_at IS NULL ORDER BY r.created_at, r.id LIMIT 51 OFFSET ?",
                   args: [offset],
                 }
               : {
-                  sql: "SELECT c.slug, json_extract(c.card, '$.title') AS title, json_extract(c.card, '$.url') AS destination, c.revision, c.updated_at, c.creator_fingerprint, (SELECT token_hash FROM accounts WHERE token_hash = c.owner AND revoked_at IS NULL) AS token_hash, EXISTS (SELECT 1 FROM banned_slugs WHERE slug = c.slug) AS banned FROM cards c WHERE instr(lower(c.slug), lower(?)) > 0 OR instr(lower(c.card), lower(?)) > 0 ORDER BY c.updated_at DESC, c.slug LIMIT 51 OFFSET ?",
+                  sql: "SELECT c.slug, json_extract(c.card, '$.title') AS title, json_extract(c.card, '$.url') AS destination, c.revision, c.updated_at, c.sponsored_at, c.verified_at, c.custom_badges, c.creator_fingerprint, (SELECT token_hash FROM accounts WHERE token_hash = c.owner AND revoked_at IS NULL) AS token_hash, EXISTS (SELECT 1 FROM banned_slugs WHERE slug = c.slug) AS banned FROM cards c WHERE instr(lower(c.slug), lower(?)) > 0 OR instr(lower(c.card), lower(?)) > 0 ORDER BY c.updated_at DESC, c.slug LIMIT 51 OFFSET ?",
                   args: [search, search, offset],
                 },
           );
           return json(res, 200, {
-            items: result.rows
-              .slice(0, 50)
-              .map((row) => ({ ...row, link: canonical + '/' + row.slug })),
+            items: result.rows.slice(0, 50).map(({ custom_badges, ...row }) => ({
+              ...row,
+              ...(!reports ? { customBadges: readCustomBadges(custom_badges) } : {}),
+              link: canonical + '/' + row.slug,
+            })),
             hasMore: result.rows.length > 50,
           });
         }
@@ -435,6 +460,37 @@ export function createHandler(options = {}) {
           });
           if (!result.rows.length) throw fail(404, 'report not found.');
           return json(res, 200, { dismissed: true });
+        }
+        const statusBadge = path.match(/^\/api\/admin\/cards\/([a-z0-9-]+)\/(sponsor|verify)$/);
+        if (statusBadge && ['POST', 'DELETE'].includes(req.method)) {
+          if (req.method === 'POST') await body(req);
+          const column = { sponsor: 'sponsored_at', verify: 'verified_at' }[statusBadge[2]];
+          const result = await db.execute({
+            sql:
+              'UPDATE cards SET ' +
+              column +
+              ' = ' +
+              (req.method === 'POST' ? 'COALESCE(' + column + ', ?)' : '?') +
+              ' WHERE slug = ? RETURNING ' +
+              column,
+            args: [req.method === 'POST' ? Date.now() : null, statusBadge[1]],
+          });
+          if (!result.rows.length) throw fail(404, 'card not found.');
+          return json(res, 200, { [column]: result.rows[0][column] });
+        }
+        const customBadges = path.match(/^\/api\/admin\/cards\/([a-z0-9-]+)\/badges$/);
+        if (customBadges && req.method === 'PUT') {
+          const input = await body(req, 65536);
+          if (Object.keys(input).length !== 1 || !Object.hasOwn(input, 'badges'))
+            throw fail(400, 'provide a badges array.');
+          const badges = normalizeCustomBadges(input.badges);
+          for (const badge of badges) publicUrl(badge.image, 'badge image url');
+          const result = await db.execute({
+            sql: 'UPDATE cards SET custom_badges = ? WHERE slug = ? RETURNING custom_badges',
+            args: [badges.length ? JSON.stringify(badges) : null, customBadges[1]],
+          });
+          if (!result.rows.length) throw fail(404, 'card not found.');
+          return json(res, 200, { customBadges: readCustomBadges(result.rows[0].custom_badges) });
         }
         const card = path.match(/^\/api\/admin\/cards\/([a-z0-9-]+)$/);
         if (card && req.method === 'DELETE') {
@@ -591,7 +647,7 @@ export function createHandler(options = {}) {
         if (path === '/api/cards' && req.method === 'GET') {
           const result = await db.execute({
             sql:
-              'SELECT slug, card, revision, updated_at FROM cards WHERE owner = ? AND ' +
+              'SELECT slug, card, revision, updated_at, verified_at, sponsored_at, custom_badges FROM cards WHERE owner = ? AND ' +
               activeSession +
               ' ORDER BY updated_at DESC',
             args: [owner, ...access()],
@@ -604,6 +660,12 @@ export function createHandler(options = {}) {
               ...JSON.parse(row.card),
               revision: row.revision,
               updatedAt: row.updated_at,
+              sponsored: row.sponsored_at != null,
+              badges: pageBadges({
+                verifiedAt: row.verified_at,
+                sponsoredAt: row.sponsored_at,
+                customBadges: readCustomBadges(row.custom_badges),
+              }),
             })),
           );
         }
@@ -611,7 +673,8 @@ export function createHandler(options = {}) {
         if (api && req.method === 'GET') {
           const result = await db.execute({
             sql:
-              'SELECT card, revision FROM cards WHERE slug = ? AND owner = ? AND ' + activeSession,
+              'SELECT card, revision, sponsored_at FROM cards WHERE slug = ? AND owner = ? AND ' +
+              activeSession,
             args: [api[1], owner, ...access()],
           });
           if (!result.rows.length) throw fail(404, 'card not found.');
@@ -619,6 +682,7 @@ export function createHandler(options = {}) {
             slug: api[1],
             ...JSON.parse(result.rows[0].card),
             revision: result.rows[0].revision,
+            sponsored: result.rows[0].sponsored_at != null,
           });
         }
         if (api && req.method === 'DELETE') {
@@ -634,7 +698,7 @@ export function createHandler(options = {}) {
         }
         const create = path === '/api/cards' && req.method === 'POST';
         if (!create && !(api && req.method === 'PUT')) throw fail(405, 'method not allowed.');
-        const input = await body(req);
+        const input = await body(req, 65536);
         const slug = normalizeSlug(input.slug ?? api?.[1]);
         const forbidden = await db.execute({
           sql: 'SELECT slug FROM banned_slugs WHERE slug = ? OR slug = ?',
@@ -644,7 +708,9 @@ export function createHandler(options = {}) {
         const now = Date.now();
         const card = normalizeCard(input, `${canonical}/${slug}`);
         if (card.url) publicUrl(card.url);
-        for (const link of componentUrls(buildEmbed(card).component))
+        if (card.seo?.image) publicUrl(card.seo.image, 'seo image url');
+        if (card.seo?.favicon) publicUrl(card.seo.favicon, 'seo favicon url');
+        for (const link of cardComponents(card).flatMap(componentUrls))
           publicUrl(link, 'component url', true);
         let result;
         try {
@@ -673,10 +739,21 @@ export function createHandler(options = {}) {
           } else {
             result = await db.execute({
               sql:
-                'UPDATE cards SET slug = ?, card = ?, revision = revision + 1, updated_at = ? WHERE slug = ? AND owner = ? AND ' +
+                "UPDATE cards SET slug = ?, card = ?, revision = revision + 1, updated_at = ?, verified_at = CASE WHEN slug = ? AND json_extract(card, '$.url') IS ? THEN verified_at ELSE NULL END WHERE slug = ? AND owner = ? AND " +
                 activeSession +
                 ' AND NOT EXISTS (SELECT 1 FROM banned_slugs WHERE slug = ? OR slug = ?) RETURNING revision',
-              args: [slug, JSON.stringify(card), now, api[1], owner, ...access(), slug, api[1]],
+              args: [
+                slug,
+                JSON.stringify(card),
+                now,
+                slug,
+                card.url,
+                api[1],
+                owner,
+                ...access(),
+                slug,
+                api[1],
+              ],
             });
             if (!result.rows.length) throw fail(404, 'card not found.');
           }
@@ -703,12 +780,18 @@ export function createHandler(options = {}) {
       if ((publicPage || publicEmbed) && ['GET', 'HEAD'].includes(req.method)) {
         const slug = (publicPage || publicEmbed)[1];
         const result = await db.execute({
-          sql: 'SELECT card FROM cards WHERE slug = ? AND NOT EXISTS (SELECT 1 FROM banned_slugs WHERE slug = cards.slug)',
+          sql: 'SELECT card, sponsored_at, verified_at, custom_badges FROM cards WHERE slug = ? AND NOT EXISTS (SELECT 1 FROM banned_slugs WHERE slug = cards.slug)',
           args: [slug],
         });
         if (!result.rows.length) throw fail(404, 'card not found.');
         const card = JSON.parse(result.rows[0].card);
-        const content = publicEmbed ? embedJson(card) : renderCard(card, `${canonical}/${slug}`);
+        const content = publicEmbed
+          ? embedJson(card)
+          : renderCard(card, `${canonical}/${slug}`, {
+              sponsoredAt: result.rows[0].sponsored_at,
+              verifiedAt: result.rows[0].verified_at,
+              customBadges: readCustomBadges(result.rows[0].custom_badges),
+            });
         res.writeHead(200, {
           'content-type': publicEmbed
             ? 'application/json; charset=utf-8'

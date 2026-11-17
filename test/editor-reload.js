@@ -41,7 +41,8 @@
     check(
       Object.keys(JSON.parse(sessionStorage.getItem(key)))
         .sort()
-        .join() === 'draft,embedMode,scroll,showErrors,tab,view',
+        .join() ===
+        'activeCard,draft,embedMode,expandedCard,pageTools,previewMode,scroll,showErrors,tab,view',
       'storage contains only editor state',
     );
     return { passed };

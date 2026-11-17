@@ -5,6 +5,9 @@ import {
   normalizeEmoji,
   thumbnailUrl,
   formatUrl,
+  componentStats,
+  isBadgeCase,
+  MAX_BADGES,
 } from './model.mjs';
 import { icon } from './icons.mjs';
 import Sortable from './vendor/sortable.mjs';
@@ -231,6 +234,32 @@ export function renderComponent(container, component) {
   container.classList.toggle('no-accent', component.accent_color == null);
   container.classList.toggle('container-spoiler', !!component.spoiler);
   container.classList.remove('revealed');
+  container.classList.toggle('badge-case', isBadgeCase(component));
+  if (isBadgeCase(component)) {
+    if (component.title) container.append(el('h3', component.title));
+    if (component.description) container.append(textPreview(component.description));
+    const badges = el('div', undefined, 'badge-collection');
+    for (const badge of component.badges || []) {
+      const image = el('img');
+      image.width = 88;
+      image.height = 31;
+      image.alt = badge.label || 'badge';
+      image.loading = 'lazy';
+      image.referrerPolicy = 'no-referrer';
+      try {
+        image.src = publicHttpUrl(badge.image, 'badge image', 2048);
+        if (badge.url) {
+          const link = el('a');
+          link.href = publicHttpUrl(badge.url, 'badge link', 2048);
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.append(image);
+          badges.append(link);
+        } else badges.append(image);
+      } catch {}
+    }
+    container.append(badges);
+  }
   function render(node) {
     if (node.type === 10) return textPreview(node.content);
     if (node.type === 1) {
@@ -429,6 +458,57 @@ export const newBlock = (type) =>
     14: { type: 14, divider: true, spacing: 1 },
   })[type];
 
+export function collapseDragZone(zone, selector) {
+  let items = [],
+    minHeight = '',
+    alignContent = '',
+    paddingTop = '';
+  function keepPosition(item, top) {
+    const delta = item.getBoundingClientRect().top - top;
+    let scroller = zone.parentElement;
+    while (scroller && scroller !== document.body) {
+      if (
+        /(auto|scroll)/.test(getComputedStyle(scroller).overflowY) &&
+        scroller.scrollHeight > scroller.clientHeight
+      )
+        break;
+      scroller = scroller.parentElement;
+    }
+    if (scroller && scroller !== document.body) scroller.scrollTop += delta;
+    else window.scrollBy({ top: delta, behavior: 'instant' });
+    return top - item.getBoundingClientRect().top;
+  }
+  return {
+    onChoose({ item }) {
+      const top = item.getBoundingClientRect().top;
+      const padding = parseFloat(getComputedStyle(zone).paddingTop) || 0;
+      minHeight = zone.style.minHeight;
+      alignContent = zone.style.alignContent;
+      paddingTop = zone.style.paddingTop;
+      zone.style.minHeight = zone.getBoundingClientRect().height + 'px';
+      zone.style.alignContent = 'start';
+      const direct = selector.trim().replace(/^>\s*/, '');
+      items = [...zone.children]
+        .filter((node) => node.matches(direct))
+        .map((node) => [node, node.classList.contains('drag-collapsed')]);
+      items.forEach(([node]) => node.classList.add('drag-collapsed'));
+      const remaining = keepPosition(item, top);
+      if (remaining > 0) zone.style.paddingTop = padding + remaining + 'px';
+    },
+    onUnchoose({ item }) {
+      const top = item.getBoundingClientRect().top;
+      items.forEach(([node, wasCollapsed]) =>
+        node.classList.toggle('drag-collapsed', wasCollapsed),
+      );
+      zone.style.minHeight = minHeight;
+      zone.style.alignContent = alignContent;
+      zone.style.paddingTop = paddingTop;
+      keepPosition(item, top);
+      items = [];
+    },
+  };
+}
+
 export function createComposer(container, onChange) {
   let root = {
     type: 17,
@@ -444,6 +524,12 @@ export function createComposer(container, onChange) {
     onChange(copy(root));
   }
   function focusHandle(items, index) {
+    if (items === root.badges) {
+      container
+        .querySelectorAll(':scope > .composer-item .drag-handle')
+        [index]?.focus({ preventScroll: true });
+      return;
+    }
     const parent =
       items === root.components
         ? container
@@ -490,6 +576,7 @@ export function createComposer(container, onChange) {
     sortables.push(
       new Sortable(parent, {
         draggable: selector,
+        ...collapseDragZone(parent, selector),
         handle: '.' + kind + '-handle',
         animation: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 91,
         ghostClass: 'reorder-placeholder',
@@ -548,7 +635,7 @@ export function createComposer(container, onChange) {
               value,
               name,
               options.max ?? Infinity,
-              kind === 'url' || kind === 'textarea',
+              !options.optional && (kind === 'url' || kind === 'textarea'),
             );
             if (options.choices && !options.choices.some(([choice]) => String(choice) === value))
               throw new Error('choose a valid ' + name + '.');
@@ -705,14 +792,78 @@ export function createComposer(container, onChange) {
       'checkbox',
     );
   }
-  function itemCard(parent, items, index, name, fields) {
-    const item = el('div', undefined, 'composer-item');
-    const heading = el('div', undefined, 'card-titlebar composer-item-heading');
-    heading.append(
-      dragHandle(items, index, name, 'item'),
-      el('span', name + ' ' + (index + 1), 'composer-item-title'),
+  function badgeFields(parent, badge) {
+    field(
+      parent,
+      'image url',
+      badge.image,
+      (value) => {
+        badge.image = value;
+      },
+      'url',
+      {
+        max: 2048,
+        placeholder: 'https://example.com/badge.gif',
+        validate: (value) => publicHttpUrl(value, 'badge image', 2048),
+      },
     );
-    const moves = el('div', undefined, 'item-actions');
+    field(
+      parent,
+      'link (optional)',
+      badge.url,
+      (value) => {
+        if (value) badge.url = value;
+        else delete badge.url;
+      },
+      'url',
+      {
+        max: 2048,
+        optional: true,
+        placeholder: 'https://example.com',
+        validate: (value) => {
+          if (value) publicHttpUrl(value, 'badge link', 2048);
+        },
+      },
+    );
+    field(
+      parent,
+      'alt text',
+      badge.label,
+      (value) => {
+        if (value) badge.label = value;
+        else delete badge.label;
+      },
+      'text',
+      { max: 80 },
+    );
+  }
+  function itemCard(parent, items, index, name, fields) {
+    const badge = name === 'badge';
+    const item = el('div', undefined, 'composer-item' + (badge ? ' badge-item' : ''));
+    const heading = el('div', undefined, 'card-titlebar composer-item-heading');
+    const content = badge ? el('div', undefined, 'component-body') : item;
+    content.id ||= 'item-' + crypto.randomUUID();
+    const title = badge
+      ? el('button', undefined, 'block-toggle')
+      : el('span', name + ' ' + (index + 1), 'composer-item-title');
+    if (badge) {
+      title.type = 'button';
+      title.append(el('span', 'badge ' + (index + 1), 'block-title'), icon('chevron-down'));
+      title.setAttribute('aria-controls', content.id);
+      const sync = () => {
+        content.hidden = collapsed.has(items[index]);
+        title.setAttribute('aria-expanded', String(!content.hidden));
+        item.toggleAttribute('data-collapsed', content.hidden);
+      };
+      title.addEventListener('click', () => {
+        if (collapsed.has(items[index])) collapsed.delete(items[index]);
+        else collapsed.add(items[index]);
+        sync();
+      });
+      sync();
+    }
+    heading.append(dragHandle(items, index, name, 'item'), title);
+    const moves = el('div', undefined, badge ? 'item-actions block-actions' : 'item-actions');
     const move = (offset, label) => {
       const button = action(
         moves,
@@ -723,19 +874,38 @@ export function createComposer(container, onChange) {
         'move ' + name + ' ' + label,
       );
       button.disabled = index + offset < 0 || index + offset >= items.length;
-      button.addEventListener('click', () => {
-        container
-          .querySelectorAll('.component-editor')
-          [root.components.indexOf(blockForItems(items))]?.querySelectorAll('.composer-item')
-          [index + offset]?.querySelector('button:not(:disabled)')
-          ?.focus({ preventScroll: true });
-      });
+      button.addEventListener('click', () => focusHandle(items, index + offset));
     };
     move(-1, 'up');
     move(1, 'down');
+    const duplicate = action(
+      moves,
+      'duplicate',
+      () => {
+        const clone = copy(items[index]);
+        if ('id' in clone) delete clone.id;
+        items.splice(index + 1, 0, clone);
+      },
+      'duplicate ' + name,
+    );
+    duplicate.replaceChildren(icon('copy'));
+    duplicate.disabled =
+      name === 'badge'
+        ? items.length >= MAX_BADGES
+        : items.length >= (name === 'button' ? 5 : 10) ||
+          (name === 'button'
+            ? componentStats(root).components >= 40
+            : componentStats(root).media >= 10);
     heading.append(moves);
     item.append(heading);
-    fields(item, items[index]);
+    fields(content, items[index]);
+    if (badge) {
+      const remove = action(moves, 'remove', () => items.splice(index, 1), 'remove badge');
+      remove.replaceChildren(icon('trash-2'));
+      item.append(content);
+      parent.append(item);
+      return;
+    }
     const footer = el('div', undefined, 'item-footer');
     const check = item.querySelector(':scope > .check-field');
     if (check) footer.append(check);
@@ -756,6 +926,41 @@ export function createComposer(container, onChange) {
     sortables = [];
     validators = [];
     container.replaceChildren();
+    container.classList.toggle('badge-case-editor', isBadgeCase(root));
+    if (isBadgeCase(root)) {
+      field(
+        container,
+        'title',
+        root.title,
+        (value) => {
+          root.title = value;
+        },
+        'text',
+        { max: 256 },
+      );
+      field(
+        container,
+        'description',
+        root.description,
+        (value) => {
+          if (value) root.description = value;
+          else delete root.description;
+        },
+        'textarea',
+        { max: 4096, optional: true },
+      );
+      container.append(
+        el('p', '88 × 31 px badges. resized automatically; shown on your page only.', 'hint'),
+      );
+      root.badges.forEach((badge, index) =>
+        itemCard(container, root.badges, index, 'badge', badgeFields),
+      );
+      const add = action(container, '+ badge', () => root.badges.push({ image: '' }));
+      add.disabled = root.badges.length >= MAX_BADGES;
+      container.append(status);
+      sortable(container, root.badges, '> .composer-item', 'item', 'badge');
+      return;
+    }
     root.components.forEach((block, index) => {
       const shell = el('section', undefined, 'component-editor');
       const heading = el('div', undefined, 'card-titlebar');
@@ -937,6 +1142,7 @@ export function createComposer(container, onChange) {
         .filter(Boolean)
         .map((error) => {
           const block = error.input.closest('.component-editor');
+          if (!block) return { ...error, label: 'badge case — ' + error.label };
           const index =
             [...container.querySelectorAll(':scope > .component-editor')].indexOf(block) + 1;
           const context = [

@@ -40,6 +40,60 @@ test('imports native, raw message, link embed and one-message Discohook backup s
     assert.deepEqual(importCardJson(JSON.stringify(data)), { component });
 });
 
+test('multicard native and Discord message roots round-trip without flattening card styles', () => {
+  const extra = {
+    type: 17,
+    accent_color: null,
+    spoiler: false,
+    components: [{ type: 10, content: 'second card' }],
+  };
+  const card = { component, additional_cards: [extra] };
+  assert.deepEqual(JSON.parse(messageJson(card)).components, [component]);
+  const message = { flags: 32768, components: [component, extra] };
+  for (const data of [
+    card,
+    message,
+    { embeds: [{ type: 'components', components: [component, extra] }] },
+    { messages: [{ data: message }] },
+  ]) {
+    assert.deepEqual(importCardJson(JSON.stringify(data)), card);
+  }
+  assert.deepEqual(importCardJson({ component, additional_cards: [] }), { component });
+  assert.equal(
+    JSON.parse(messageJson({ component, additional_cards: Array(6).fill(extra) })).components
+      .length,
+    1,
+  );
+  assert.throws(() => importCardJson({ component, additional_cards: Array(7).fill(extra) }));
+  assert.throws(() =>
+    importCardJson({
+      component,
+      additional_cards: [
+        component,
+        { ...extra, components: [{ type: 10, content: 'x'.repeat(4000) }] },
+      ],
+    }),
+  );
+});
+
+test('discord export excludes site-only cards regardless of their combined size', () => {
+  const first = { type: 17, components: Array.from({ length: 19 }, () => ({ type: 14 })) };
+  const second = structuredClone(first);
+  assert.equal(
+    JSON.parse(messageJson({ component: first, additional_cards: [second] })).components.length,
+    1,
+  );
+  second.components.push({ type: 14 });
+  assert.deepEqual(
+    JSON.parse(messageJson({ component: first, additional_cards: [second] })).components,
+    [first],
+  );
+  assert.deepEqual(importCardJson({ component: first, additional_cards: [second] }), {
+    component: first,
+    additional_cards: [second],
+  });
+});
+
 test('classic embed import maps text, fields, media, footer and timestamp to components', () => {
   const result = importCardJson({
     embeds: [
@@ -87,7 +141,12 @@ test('unsupported or oversized imports fail before replacing a draft', () => {
     { messages: [{ data: message }, { data: message }] },
     { backups: [{}, {}] },
     { ...message, content: 'extra' },
-    { components: [component, component] },
+    { components: [component, component], content: 'extra' },
+    { components: [component, { type: 14 }] },
+    { components: [component], embeds: [{}] },
+    { component, additional_cards: null },
+    { component, additional_cards: [{ type: 10, content: 'not a root' }] },
+    { components: Array(11).fill(component) },
     { embeds: [{ title: 'one' }, { title: 'two' }] },
     { content: 'hi', attachments: [{ id: '123' }] },
     { content: 'hi', components: [{ type: 3 }] },

@@ -71,7 +71,7 @@ test('layered creator and reporting bans persist, revoke linked tokens, and allo
         await request(
           '/api/reports',
           'POST',
-          { url: 'https://linkbed.me/' + card.slug, confirmed: true },
+          { url: 'https://linkbed.me/' + card.slug, confirmed: true, reason: 'spam or scams' },
           cookies,
         )
       ).status,
@@ -88,7 +88,7 @@ test('layered creator and reporting bans persist, revoke linked tokens, and allo
         await request(
           '/api/reports',
           'POST',
-          { url: 'https://linkbed.me/' + card.slug, confirmed: true },
+          { url: 'https://linkbed.me/' + card.slug, confirmed: true, reason: 'spam or scams' },
           cookies,
         )
       ).status,
@@ -111,7 +111,7 @@ test('layered creator and reporting bans persist, revoke linked tokens, and allo
         await request(
           '/api/reports',
           'POST',
-          { url: 'https://linkbed.me/' + card.slug, confirmed: true },
+          { url: 'https://linkbed.me/' + card.slug, confirmed: true, reason: 'spam or scams' },
           '',
           'moderation-test/1',
         )
@@ -124,7 +124,7 @@ test('layered creator and reporting bans persist, revoke linked tokens, and allo
         await request(
           '/api/reports',
           'POST',
-          { url: 'https://linkbed.me/' + card.slug, confirmed: true },
+          { url: 'https://linkbed.me/' + card.slug, confirmed: true, reason: 'spam or scams' },
           cookies,
         )
       ).status,
@@ -164,7 +164,7 @@ test('layered creator and reporting bans persist, revoke linked tokens, and allo
         await request(
           '/api/reports',
           'POST',
-          { url: 'https://linkbed.me/' + card.slug, confirmed: true },
+          { url: 'https://linkbed.me/' + card.slug, confirmed: true, reason: 'spam or scams' },
           cookies,
         )
       ).status,

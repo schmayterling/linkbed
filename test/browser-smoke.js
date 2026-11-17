@@ -1,6 +1,7 @@
 // Paste into the console at http://localhost:3000; no account or database changes.
 (async () => {
-  const { renderComponent, textPreview, createComposer } = await import('/components.mjs');
+  const { renderComponent, textPreview, createComposer, collapseDragZone } =
+    await import('/components.mjs');
   const check = (value, name) => {
     if (!value) throw new Error(name);
   };
@@ -126,6 +127,26 @@
     'reorder buttons',
   );
   check(composer.get().components[0].components[0].disabled, 'reorder preserves button state');
+  fields.querySelectorAll('[aria-label="duplicate button"]')[0].click();
+  check(
+    composer.get().components[0].components.length === 3 &&
+      composer.get().components[0].components[1].disabled,
+    'duplicate preserves button state',
+  );
+  fields
+    .querySelectorAll('.component-editor')[0]
+    .querySelectorAll('.item-footer .text-button')[1]
+    .click();
+  fields.querySelectorAll('[aria-label="duplicate media"]')[0].click();
+  check(
+    composer.get().components[1].items.length === 3 &&
+      composer.get().components[1].items[1].spoiler,
+    'duplicate preserves media state',
+  );
+  fields
+    .querySelectorAll('.component-editor')[1]
+    .querySelectorAll('.item-footer .text-button')[1]
+    .click();
   fields.querySelectorAll('[aria-label="move media up"]')[1].click();
   check(composer.get().components[1].items[1].spoiler, 'reorder preserves media state');
   fields.querySelector('.item-footer .text-button').click();
@@ -243,6 +264,43 @@
     'block expands accessibly',
   );
   fields.remove();
+  const dragZone = document.createElement('div');
+  dragZone.style.cssText = 'width:300px;display:grid;gap:14px';
+  for (let i = 0; i < 2; i++) {
+    const block = document.createElement('section');
+    block.className = 'component-editor';
+    const heading = document.createElement('div');
+    heading.className = 'card-titlebar';
+    heading.textContent = 'drag check';
+    const body = document.createElement('div');
+    body.style.height = '150px';
+    block.append(heading, body);
+    dragZone.append(block);
+  }
+  document.body.append(dragZone);
+  const dragItem = dragZone.lastElementChild;
+  const zoneHeight = dragZone.getBoundingClientRect().height;
+  const dragTop = dragItem.getBoundingClientRect().top;
+  const hooks = collapseDragZone(dragZone, '.component-editor');
+  hooks.onChoose({ item: dragItem });
+  check(
+    [...dragZone.children].every((node) => node.classList.contains('drag-collapsed')),
+    'drag collapses every item in its zone',
+  );
+  check(
+    Math.abs(dragZone.getBoundingClientRect().height - zoneHeight) < 1,
+    'drag reserves zone height',
+  );
+  check(
+    Math.abs(dragItem.getBoundingClientRect().top - dragTop) < 1,
+    'drag keeps grabbed item anchored',
+  );
+  hooks.onUnchoose({ item: dragItem });
+  check(
+    !dragZone.querySelector('.drag-collapsed') && !dragZone.style.minHeight,
+    'drag restores open states and height',
+  );
+  dragZone.remove();
 
   const publishDialog = document.querySelector('#publish-dialog');
   const publishConfirm = document.querySelector('#publish-confirm');
@@ -297,5 +355,5 @@
   spacer.remove();
   scrollTo(0, position);
   window.dispatchEvent(new Event('scroll'));
-  return { passed: 51 };
+  return { passed: 57 };
 })();

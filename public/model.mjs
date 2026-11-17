@@ -1,4 +1,34 @@
 export const MAX_BYTES = 3000;
+export const MAX_CARDS = 7;
+export const MAX_BADGES = 40;
+export const MAX_CUSTOM_BADGES = 20;
+export const REPORT_REASONS = [
+  'spam or scams',
+  'harassment or hate',
+  'violence or threats',
+  'sexual content',
+  'personal information',
+  'other',
+];
+
+export const PAGE_COLORS = {
+  light: {
+    background: '#fffaea',
+    card: '#f2f3f5',
+    text: '#202225',
+    links: '#006cb8',
+    button: '#e4e6e8',
+    button_text: '#202225',
+  },
+  dark: {
+    background: '#141414',
+    card: '#393a41',
+    text: '#f2f3f5',
+    links: '#64baff',
+    button: '#44444b',
+    button_text: '#f2f3f5',
+  },
+};
 
 export class ValidationError extends Error {
   status = 400;
@@ -190,6 +220,18 @@ export function normalizeSlug(value) {
   return value;
 }
 
+export function normalizeReportReason({ reason, details } = {}) {
+  if (!REPORT_REASONS.includes(reason))
+    throw new ValidationError('choose a reason for this report.');
+  return {
+    reason,
+    details:
+      reason === 'other'
+        ? text(typeof details === 'string' ? details.trim() : details, 'report details', 2000, true)
+        : null,
+  };
+}
+
 export function normalizeReportLink(value, origin) {
   if (typeof value !== 'string' || value.length > 2048)
     throw new ValidationError('enter a valid linkbed link.');
@@ -235,6 +277,69 @@ const fields = {
   17: ['components', 'accent_color', 'spoiler'],
 };
 
+export function pageBadges({ verifiedAt, sponsoredAt, customBadges = [] } = {}) {
+  return [
+    ...(verifiedAt != null ? [{ name: 'verified', icon: 'badge-check' }] : []),
+    ...(sponsoredAt != null ? [{ name: 'sponsor', icon: 'heart' }] : []),
+    ...customBadges,
+  ];
+}
+
+export function normalizeCustomBadges(value) {
+  if (value == null) return [];
+  if (!Array.isArray(value) || value.length > MAX_CUSTOM_BADGES)
+    throw new ValidationError(`use up to ${MAX_CUSTOM_BADGES} custom badges.`);
+  return value.map((badge) => {
+    object(badge, ['name', 'image'], 'custom badge');
+    return {
+      name: text(badge.name, 'badge name', 80, true),
+      image: httpsUrl(badge.image, 'badge image url'),
+    };
+  });
+}
+
+export function isBadgeCase(root) {
+  return root?.type === 'badge_case';
+}
+
+function cardAppearance(source, target) {
+  if ('accent_color' in source) {
+    if (
+      source.accent_color !== null &&
+      (!Number.isInteger(source.accent_color) ||
+        source.accent_color < 0 ||
+        source.accent_color > 16777215)
+    ) {
+      throw new ValidationError('accent_color must be null or a 24-bit color.');
+    }
+    target.accent_color = source.accent_color;
+  }
+  boolean(source, target, 'spoiler');
+}
+
+export function normalizePageCard(root) {
+  if (!isBadgeCase(root)) return normalizeComponent(root);
+  object(root, ['type', 'title', 'description', 'accent_color', 'spoiler', 'badges'], 'badge case');
+  if (!Array.isArray(root.badges) || !root.badges.length || root.badges.length > MAX_BADGES)
+    throw new ValidationError(`use one to ${MAX_BADGES} badges per badge case.`);
+  const result = {
+    type: 'badge_case',
+    title:
+      'title' in root ? text(root.title, 'badge case title', 256) || 'badge case' : 'badge case',
+    badges: root.badges.map((badge) => {
+      object(badge, ['image', 'url', 'label'], 'badge');
+      const result = { image: publicHttpUrl(badge.image, 'badge image url') };
+      if ('url' in badge) result.url = publicHttpUrl(badge.url, 'badge link url');
+      if ('label' in badge) result.label = text(badge.label, 'badge label', 80);
+      return result;
+    }),
+  };
+  if ('description' in root)
+    result.description = string(root.description, 'badge case description', 4096);
+  cardAppearance(root, result);
+  return result;
+}
+
 export function normalizeComponent(component) {
   const ids = new Set();
   let count = 0;
@@ -269,18 +374,7 @@ export function normalizeComponent(component) {
     }
     switch (value.type) {
       case 17:
-        if ('accent_color' in value) {
-          if (
-            value.accent_color !== null &&
-            (!Number.isInteger(value.accent_color) ||
-              value.accent_color < 0 ||
-              value.accent_color > 16777215)
-          ) {
-            throw new ValidationError('accent_color must be null or a 24-bit color.');
-          }
-          result.accent_color = value.accent_color;
-        }
-        boolean(value, result, 'spoiler');
+        cardAppearance(value, result);
         children([1, 9, 10, 12, 14], 1, 39);
         break;
       case 1:
@@ -371,6 +465,12 @@ export function componentImages(component) {
 export function componentUrls(component) {
   const urls = [];
   visit(component, (node) => {
+    if (isBadgeCase(node) && Array.isArray(node.badges)) {
+      for (const badge of node.badges) {
+        if (typeof badge?.image === 'string') urls.push(badge.image);
+        if (typeof badge?.url === 'string') urls.push(badge.url);
+      }
+    }
     if (node.type === 2 && typeof node.url === 'string') urls.push(node.url);
     if (node.type === 11 && typeof node.media?.url === 'string') urls.push(node.media.url);
     if (node.type === 12 && Array.isArray(node.items)) {
@@ -381,15 +481,82 @@ export function componentUrls(component) {
   return urls;
 }
 
+export function normalizeSeo(value) {
+  if (value == null) return undefined;
+  object(value, ['title', 'image', 'favicon'], 'seo');
+  const title = text(value.title ?? '', 'seo title', 256);
+  const image = text(value.image ?? '', 'seo image url', 2048);
+  const favicon = text(value.favicon ?? '', 'seo favicon url', 2048);
+  const seo = {};
+  if (title) seo.title = title;
+  if (image) seo.image = httpsUrl(image, 'seo image url');
+  if (favicon) seo.favicon = httpsUrl(favicon, 'seo favicon url');
+  return Object.keys(seo).length ? seo : undefined;
+}
+
+export function normalizeEmbedCard(value, count) {
+  if (value == null) return null;
+  if (!Number.isInteger(value) || value < 0 || value >= count)
+    throw new ValidationError('choose a card from this page for the embed.');
+  return value;
+}
+
+function normalizeAppearance(value) {
+  const result = {};
+  if (value.page_theme != null && value.page_theme !== 'auto') {
+    if (!['light', 'dark'].includes(value.page_theme))
+      throw new ValidationError('choose automatic, light, or dark for the page theme.');
+    result.page_theme = value.page_theme;
+  }
+  if (value.page_color_scheme != null && value.page_color_scheme !== 'auto') {
+    if (!['light', 'dark'].includes(value.page_color_scheme))
+      throw new ValidationError('choose separate, light, or dark for the page color scheme.');
+    result.page_color_scheme = value.page_color_scheme;
+  }
+  if (value.page_colors == null) return result;
+  object(value.page_colors, ['light', 'dark'], 'page colors');
+  const colors = {};
+  for (const theme of ['light', 'dark']) {
+    if (value.page_colors[theme] == null) continue;
+    object(value.page_colors[theme], Object.keys(PAGE_COLORS[theme]), 'page colors');
+    const palette = {};
+    for (const [key, color] of Object.entries(value.page_colors[theme])) {
+      if (color == null || color === '') continue;
+      palette[key] = normalizeColor(color);
+    }
+    if (Object.keys(palette).length) colors[theme] = palette;
+  }
+  if (Object.keys(colors).length) result.page_colors = colors;
+  return result;
+}
+
 export function normalizeCard(value, pageUrl) {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new ValidationError('invalid card.');
   const title = text(value.title, 'title', 256, true);
   const description = text(value.description ?? '', 'description', 4096);
   const url = destinationUrl(value.url, pageUrl);
+  const additional = value.additional_cards === undefined ? [] : value.additional_cards;
+  if (!Array.isArray(additional) || additional.length >= MAX_CARDS)
+    throw new ValidationError(`use up to ${MAX_CARDS} cards per page.`);
+  const component = 'component' in value ? normalizePageCard(value.component) : null;
+  const additionalCards = additional.map(normalizePageCard);
+  const roots = [component, ...additionalCards];
+  if (component && !roots.some((root) => root?.type === 17))
+    throw new ValidationError('keep at least one discord card on this page.');
+  const embedCard = normalizeEmbedCard(value.embed_card, roots.length);
+  if (embedCard !== null && isBadgeCase(roots[embedCard]))
+    throw new ValidationError('choose a discord card for the embed.');
+  const seo = normalizeSeo(value.seo);
+  const extras = {
+    ...(additionalCards.length ? { additional_cards: additionalCards } : {}),
+    ...(embedCard !== null ? { embed_card: embedCard } : {}),
+    ...(seo ? { seo } : {}),
+    ...normalizeAppearance(value),
+  };
+  boolean(value, extras, 'sponsor_hidden');
   const color = normalizeColor(value.color === undefined ? '#5865f2' : value.color);
-  if ('component' in value) {
-    const component = normalizeComponent(value.component);
+  if (component) {
     return {
       title,
       description,
@@ -398,6 +565,7 @@ export function normalizeCard(value, pageUrl) {
       buttons: [],
       images: componentImages(component),
       component,
+      ...extras,
     };
   }
   const legacyButtons = value.buttons === undefined ? [] : value.buttons;
@@ -411,13 +579,20 @@ export function normalizeCard(value, pageUrl) {
     url: httpsUrl(button?.url, 'button url', 512),
   }));
   const images = legacyImages.map((image) => httpsUrl(image, 'image url'));
-  const card = { title, description, url, color: color?.toLowerCase() ?? null, buttons, images };
-  normalizeComponent(buildEmbed(card).component);
+  const card = {
+    title,
+    description,
+    url,
+    color: color?.toLowerCase() ?? null,
+    buttons,
+    images,
+    ...extras,
+  };
+  normalizeComponent(legacyComponent(card));
   return card;
 }
 
-export function buildEmbed(card) {
-  if ('component' in card) return { component: card.component };
+function legacyComponent(card) {
   const title = card.title.replace(/([\\*_\x60~|[\]<>#])/g, '\\$1');
   const components = [
     { type: 10, content: `## ${title}${card.description ? '\n' + card.description : ''}` },
@@ -437,18 +612,71 @@ export function buildEmbed(card) {
     });
   }
   return {
-    component: {
-      type: 17,
-      accent_color: card.color === null ? null : parseInt(card.color.slice(1), 16),
-      components,
-    },
+    type: 17,
+    accent_color: card.color === null ? null : parseInt(card.color.slice(1), 16),
+    components,
+  };
+}
+
+export function cardComponents(card) {
+  return [
+    'component' in card ? card.component : legacyComponent(card),
+    ...(card.additional_cards || []),
+  ];
+}
+
+export function selectedEmbedIndex(card) {
+  let roots;
+  try {
+    roots = cardComponents(card);
+  } catch {
+    return -1;
+  }
+  return Number.isInteger(card.embed_card) && roots[card.embed_card]?.type === 17
+    ? card.embed_card
+    : roots.findIndex((root) => root?.type === 17);
+}
+
+export function buildEmbed(card) {
+  return { component: cardComponents(card)[selectedEmbedIndex(card)] };
+}
+
+export function seoMetadata(card) {
+  let component;
+  try {
+    component = buildEmbed(card).component;
+  } catch {}
+  const nodes = Array.isArray(component?.components) ? component.components : [];
+  const content =
+    nodes
+      .flatMap((node) =>
+        node?.type === 9 && Array.isArray(node.components) ? node.components : [node],
+      )
+      .find((node) => node?.type === 10 && typeof node.content === 'string')?.content || '';
+  const automatic = content
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/^[\s#>*-]+/gm, '')
+    .replace(/[*_\x60~|]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return {
+    title:
+      (typeof card?.seo?.title === 'string' && card.seo.title.trim()) ||
+      (typeof card?.title === 'string' ? card.title : ''),
+    description: (typeof card?.description === 'string' && card.description.trim()) || automatic,
+    image:
+      (typeof card?.seo?.image === 'string' && card.seo.image.trim()) ||
+      componentImages(component).find((image) => !/\.(mp4|webm|mov)(?:$|[?#])/i.test(image)) ||
+      '',
   };
 }
 
 function serialize(embed) {
-  return JSON.stringify(embed, (key, value) =>
-    key === 'emoji' ? normalizeEmojiPresentation(value) : value,
-  ).replace(/</g, '\\u003c');
+  return JSON.stringify(embed, (key, value) => {
+    if (key === 'type' && (typeof value !== 'number' || !Object.hasOwn(fields, value)))
+      throw new ValidationError('component type is not allowed here.');
+    return key === 'emoji' ? normalizeEmojiPresentation(value) : value;
+  }).replace(/</g, '\\u003c');
 }
 
 function checkBytes(embed) {

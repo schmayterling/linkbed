@@ -7,8 +7,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createApp } from '../server.mjs';
+import { openDatabase } from '../database.mjs';
 import { createHandler, isLocalAdminRequest } from '../handler.mjs';
-import { normalizeReportLink, normalizeSlug } from '../public/model.mjs';
+import {
+  REPORT_REASONS,
+  normalizeReportReason,
+  normalizeReportLink,
+  normalizeSlug,
+} from '../public/model.mjs';
 
 test('report links accept only card paths on this site and reserve admin', () => {
   const origin = 'http://localhost:3000';
@@ -36,6 +42,108 @@ test('report links accept only card paths on this site and reserve admin', () =>
     assert.throws(() => normalizeSlug(slug));
     assert.throws(() => normalizeReportLink('https://linkbed.me/' + slug, origin));
     assert.throws(() => normalizeReportLink('https://linkbed.me/p/' + slug, origin));
+  }
+});
+
+test('report reasons require a listed choice and other details within 2000 trimmed characters', () => {
+  for (const reason of REPORT_REASONS.filter((reason) => reason !== 'other')) {
+    assert.deepEqual(normalizeReportReason({ reason, details: { ignored: true } }), {
+      reason,
+      details: null,
+    });
+  }
+  for (const reason of [undefined, null, '', 'spam', 'OTHER', 1, {}, []]) {
+    assert.throws(() => normalizeReportReason({ reason }), { status: 400 });
+  }
+  for (const details of [undefined, null, '', ' \n ', 7, {}, [], 'x'.repeat(2001)]) {
+    assert.throws(() => normalizeReportReason({ reason: 'other', details }), { status: 400 });
+  }
+  assert.deepEqual(
+    normalizeReportReason({ reason: 'other', details: ' \n' + 'x'.repeat(2000) + '\n ' }),
+    {
+      reason: 'other',
+      details: 'x'.repeat(2000),
+    },
+  );
+});
+
+test('report reason migration preserves existing rows with nullable text fields and can reopen', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'linkbed-report-migrate-'));
+  const dbPath = join(directory, 'cards.sqlite');
+  const old = new DatabaseSync(dbPath);
+  old.exec(
+    'CREATE TABLE abuse_reports (id INTEGER PRIMARY KEY, slug TEXT NOT NULL, url TEXT NOT NULL, created_at INTEGER NOT NULL, resolved_at INTEGER, reporter_fingerprint TEXT)',
+  );
+  old
+    .prepare('INSERT INTO abuse_reports (slug, url, created_at) VALUES (?, ?, ?)')
+    .run('old-card', 'https://linkbed.me/old-card', 123);
+  old.exec(`
+    CREATE TABLE accounts (token_hash TEXT PRIMARY KEY, created_at INTEGER NOT NULL, revoked_at INTEGER);
+    CREATE TABLE sessions (hash TEXT PRIMARY KEY, owner TEXT NOT NULL, expires_at INTEGER NOT NULL);
+    CREATE TABLE cards (slug TEXT PRIMARY KEY, owner TEXT NOT NULL, card TEXT NOT NULL, revision INTEGER NOT NULL, updated_at INTEGER NOT NULL, creator_fingerprint TEXT);
+    INSERT INTO accounts VALUES ('existing-token-hash', 100, NULL);
+    INSERT INTO sessions VALUES ('existing-session-hash', 'existing-token-hash', 9999999999999);
+  `);
+  const savedCard = JSON.stringify({
+    title: 'existing page',
+    url: null,
+    component: { type: 17, components: [{ type: 10, content: 'keep this content' }] },
+  });
+  old
+    .prepare('INSERT INTO cards VALUES (?, ?, ?, ?, ?, ?)')
+    .run('old-card', 'existing-token-hash', savedCard, 7, 123, 'existing-fingerprint');
+  const before = Object.fromEntries(
+    ['accounts', 'sessions', 'cards'].map((table) => [
+      table,
+      old
+        .prepare('SELECT * FROM ' + table)
+        .all()
+        .map((row) => ({ ...row })),
+    ]),
+  );
+  old.close();
+  let db;
+  try {
+    for (let i = 0; i < 2; i++) {
+      db = await openDatabase({ dbPath, databaseUrl: '' });
+      for (const table of ['accounts', 'sessions', 'cards']) {
+        const after = (await db.execute('SELECT * FROM ' + table)).rows.map((row) => {
+          const values = { ...row };
+          if (table === 'cards') {
+            for (const key of ['sponsored_at', 'verified_at', 'custom_badges']) {
+              assert.equal(values[key], null);
+              delete values[key];
+            }
+          }
+          return values;
+        });
+        assert.deepEqual(after, before[table], table + ' existing fields must remain unchanged');
+      }
+      const columns = (await db.execute('PRAGMA table_info(abuse_reports)')).rows;
+      for (const field of ['reason', 'details']) {
+        const column = columns.find((column) => column.name === field);
+        assert.equal(column.type, 'TEXT');
+        assert.equal(column.notnull, 0);
+      }
+      const row = (
+        await db.execute('SELECT slug, url, created_at, reason, details FROM abuse_reports')
+      ).rows[0];
+      assert.deepEqual(
+        { ...row },
+        {
+          slug: 'old-card',
+          url: 'https://linkbed.me/old-card',
+          created_at: 123,
+          reason: null,
+          details: null,
+        },
+      );
+      db.close();
+      db = null;
+    }
+  } finally {
+    db?.close();
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 
@@ -136,7 +244,7 @@ test('serverless handler rejects admin routes before connecting to the database'
 test('abuse reports persist, throttle, and can be dismissed or resolved by local link deletion', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'linkbed-admin-'));
   const dbPath = join(directory, 'cards.sqlite');
-  const { server, close } = createApp({ dbPath, origin: 'http://localhost:3000' });
+  const { server, close } = createApp({ dbPath, databaseUrl: '', origin: 'http://localhost:3000' });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const base = 'http://127.0.0.1:' + server.address().port;
@@ -200,7 +308,25 @@ test('abuse reports persist, throttle, and can be dismissed or resolved by local
       403,
     );
     const report = (data) =>
-      request('/api/reports', 'POST', data, { origin: 'http://localhost:3000' });
+      request(
+        '/api/reports',
+        'POST',
+        { reason: 'spam or scams', ...data },
+        { origin: 'http://localhost:3000' },
+      );
+    for (const invalid of [
+      { reason: undefined },
+      { reason: 'invalid' },
+      { reason: 'other', details: ' ' },
+      { reason: 'other', details: 'x'.repeat(2001) },
+    ]) {
+      assert.equal(
+        (await report({ url: 'https://linkbed.me/card-0', confirmed: true, ...invalid })).status,
+        400,
+      );
+    }
+    assert.equal(inspect.prepare('SELECT COUNT(*) AS count FROM abuse_reports').get().count, 0);
+    inspect.exec('DELETE FROM rate_limits');
     assert.equal(
       (await report({ url: 'https://linkbed.me/card-0', confirmed: false })).status,
       400,
@@ -211,11 +337,19 @@ test('abuse reports persist, throttle, and can be dismissed or resolved by local
       404,
     );
     assert.equal(
-      (await report({ url: 'https://linkbed.me/card-0?v=1', confirmed: true })).status,
+      (await report({ url: 'https://linkbed.me/card-0?v=1', confirmed: true, details: 'ignored' }))
+        .status,
       201,
     );
     assert.equal(
-      (await report({ url: 'https://linkbed.ryana.dev/p/card-0', confirmed: true })).status,
+      (
+        await report({
+          url: 'https://linkbed.ryana.dev/p/card-0',
+          confirmed: true,
+          reason: 'other',
+          details: ' \n<script>alert(2)</script>\n ',
+        })
+      ).status,
       201,
     );
     assert.equal((await report({ url: 'https://linkbed.me/card-0', confirmed: true })).status, 429);
@@ -224,6 +358,20 @@ test('abuse reports persist, throttle, and can be dismissed or resolved by local
     assert.equal(reports.items.length, 2);
     assert.equal(reports.items[0].url, 'https://linkbed.me/card-0');
     assert.equal(reports.items[0].title, '<script>alert(1)</script>');
+    assert.equal(reports.items[0].reason, 'spam or scams');
+    assert.equal(reports.items[0].details, null);
+    assert.equal(reports.items[1].reason, 'other');
+    assert.equal(reports.items[1].details, '<script>alert(2)</script>');
+    const storedReports = inspect
+      .prepare('SELECT reason, details FROM abuse_reports ORDER BY id')
+      .all();
+    assert.deepEqual(
+      storedReports.map((row) => ({ ...row })),
+      [
+        { reason: 'spam or scams', details: null },
+        { reason: 'other', details: '<script>alert(2)</script>' },
+      ],
+    );
     assert.ok(reports.items.every((row) => !Object.hasOwn(row, 'owner')));
     const cards = await request('/api/admin/cards').then((r) => r.json());
     assert.equal(cards.items.length, 50);

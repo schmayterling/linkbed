@@ -36,6 +36,7 @@ const names = [
   'grip-vertical',
   'hand',
   'heart',
+  'badge-check',
   'house',
   'lightbulb',
   'link',

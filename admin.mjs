@@ -1,5 +1,5 @@
 import { icon, mountIcons } from './icons.mjs';
-import { normalizeSlug } from './model.mjs';
+import { normalizeSlug, normalizeCustomBadges, MAX_CUSTOM_BADGES } from './model.mjs';
 
 const $ = (selector) => document.querySelector(selector);
 const kinds = ['reports', 'links', 'fingerprints', 'tokens', 'slugs'];
@@ -43,6 +43,101 @@ async function api(path, options = {}) {
   if (!response.ok) throw new Error(data.error || 'request failed.');
   return data;
 }
+const badgeDialog = $('#admin-badge-dialog');
+let badgeSlug = '';
+function addBadgeRow(badge = {}) {
+  const row = element('div', undefined, 'admin-custom-badge');
+  for (const [key, label, max] of [
+    ['name', 'name', 80],
+    ['image', 'image url', 2048],
+  ]) {
+    const group = element('div', undefined, 'composer-field');
+    const input = element('input');
+    input.id = 'badge-' + crypto.randomUUID();
+    input.type = key === 'image' ? 'url' : 'text';
+    input.dataset.badgeField = key;
+    input.value = badge[key] || '';
+    input.maxLength = max;
+    input.required = true;
+    const caption = element('label', label);
+    caption.htmlFor = input.id;
+    group.append(caption, input);
+    row.append(group);
+  }
+  const remove = element('button', 'remove badge', 'text-button');
+  remove.type = 'button';
+  remove.addEventListener('click', () => {
+    row.remove();
+    syncBadgeLimit();
+  });
+  row.append(remove);
+  $('#admin-badge-list').append(row);
+  syncBadgeLimit();
+}
+function syncBadgeLimit() {
+  $('#admin-add-badge').disabled =
+    busy || $('#admin-badge-list').children.length >= MAX_CUSTOM_BADGES;
+}
+function editBadges(item) {
+  if (busy) return;
+  badgeSlug = item.slug;
+  $('#admin-badge-card').textContent = '/' + item.slug;
+  $('#admin-badge-error').textContent = '';
+  $('#admin-badge-list').replaceChildren();
+  for (const badge of item.customBadges?.length ? item.customBadges : [{}]) addBadgeRow(badge);
+  badgeDialog.showModal();
+  badgeDialog.querySelector('input')?.focus();
+}
+$('#admin-add-badge').addEventListener('click', () => {
+  if (!busy && $('#admin-badge-list').children.length < MAX_CUSTOM_BADGES) {
+    addBadgeRow();
+    $('#admin-badge-list').lastElementChild.querySelector('input').focus();
+  }
+});
+for (const button of badgeDialog.querySelectorAll('[data-close-badges]'))
+  button.addEventListener('click', () => {
+    if (!busy) badgeDialog.close();
+  });
+badgeDialog.addEventListener('cancel', (event) => {
+  if (busy) event.preventDefault();
+});
+badgeDialog.addEventListener('close', () => $('#admin-badge-list').replaceChildren());
+$('#admin-badge-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (busy || !event.target.reportValidity()) return;
+  let badges;
+  try {
+    badges = normalizeCustomBadges(
+      [...$('#admin-badge-list').children].map((row) =>
+        Object.fromEntries(
+          [...row.querySelectorAll('input')].map((input) => [
+            input.dataset.badgeField,
+            input.value,
+          ]),
+        ),
+      ),
+    );
+  } catch (error) {
+    $('#admin-badge-error').textContent = error.message;
+    return;
+  }
+  setBusy(true);
+  $('#admin-badge-error').textContent = '';
+  try {
+    await api('cards/' + badgeSlug + '/badges', {
+      method: 'PUT',
+      body: JSON.stringify({ badges }),
+    });
+    await renderLists();
+    badgeDialog.close();
+    $('#admin-status').textContent = 'custom badges saved.';
+  } catch (error) {
+    $('#admin-badge-error').textContent = error.message;
+  } finally {
+    setBusy(false);
+    syncBadgeLimit();
+  }
+});
 function openLink(value, label) {
   const node = element('a', label);
   try {
@@ -251,6 +346,15 @@ function renderRow(kind, item) {
     const title = element('strong', item.title || '/' + item.slug, 'admin-card-name');
     cell(
       title,
+      ...(item.verified_at != null ? [status('verified')] : []),
+      ...(item.sponsored_at != null ? [status('sponsor')] : []),
+      ...(item.customBadges || []).map((badge) => status(badge.name)),
+      ...(kind === 'reports'
+        ? [
+            element('p', item.reason || 'reason not recorded', 'muted'),
+            ...(item.details ? [element('p', item.details)] : []),
+          ]
+        : []),
       openLink(item.link, '/' + item.slug),
       ...(kind === 'links'
         ? [
@@ -280,6 +384,27 @@ function renderRow(kind, item) {
       cell(element('code', shortHash(item.creator_fingerprint)));
       cell(status(item.banned ? 'banned' : 'live', !!item.banned));
       cell(element('time', date(item.updated_at)));
+      actions.push(
+        [
+          item.verified_at != null ? 'remove verified badge' : 'mark as verified',
+          () =>
+            mutate(
+              'cards/' + item.slug + '/verify',
+              item.verified_at != null ? 'DELETE' : 'POST',
+              item.verified_at != null ? 'verified badge removed.' : 'verified badge added.',
+            ),
+        ],
+        ['custom badges', () => editBadges(item)],
+      );
+      actions.push([
+        item.sponsored_at != null ? 'remove sponsor badge' : 'mark as sponsor',
+        () =>
+          mutate(
+            'cards/' + item.slug + '/sponsor',
+            item.sponsored_at != null ? 'DELETE' : 'POST',
+            item.sponsored_at != null ? 'sponsor badge removed.' : 'sponsor badge added.',
+          ),
+      ]);
     }
     if (!item.removed) {
       if (item.creator_fingerprint)

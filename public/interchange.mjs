@@ -1,4 +1,12 @@
-import { buildEmbed, normalizeComponent, publicHttpUrl, ValidationError } from './model.mjs';
+import {
+  MAX_CARDS,
+  buildEmbed,
+  normalizeCard,
+  normalizeComponent,
+  normalizeEmbedCard,
+  publicHttpUrl,
+  ValidationError,
+} from './model.mjs';
 
 const invalid = (message) => {
   throw new ValidationError(message);
@@ -7,6 +15,22 @@ const object = (value) => value && typeof value === 'object' && !Array.isArray(v
 const literal = (value) => String(value).replace(/([\\*_`~|[\]<>#])/g, '\\$1');
 const text = (content) => ({ type: 10, content });
 const nonempty = (value) => typeof value === 'string' && value.trim();
+
+function normalizeRoots(components) {
+  if (!Array.isArray(components) || !components.length || components.length > MAX_CARDS)
+    invalid(`import one to ${MAX_CARDS} card containers.`);
+  return components.map(normalizeComponent);
+}
+
+function componentCard(components, embed_card) {
+  const [component, ...additional_cards] = normalizeRoots(components);
+  const selected = normalizeEmbedCard(embed_card, additional_cards.length + 1);
+  return {
+    component,
+    ...(additional_cards.length ? { additional_cards } : {}),
+    ...(selected !== null ? { embed_card: selected } : {}),
+  };
+}
 
 export function linkedEmbedCode(pageUrl, sourceUrl) {
   const href = publicHttpUrl(
@@ -54,11 +78,6 @@ export function linkedEmbedCode(pageUrl, sourceUrl) {
 
 function richEmbed(embed) {
   if (!object(embed)) invalid('invalid embed.');
-  if (embed.type === 'components') {
-    if (!Array.isArray(embed.components) || embed.components.length !== 1)
-      invalid('import one component container.');
-    return normalizeComponent(embed.components[0]);
-  }
   if (embed.type && embed.type !== 'rich')
     invalid('only rich or component embeds can be imported.');
   if (embed.video || embed.provider)
@@ -137,19 +156,30 @@ export function importCardJson(value) {
     data = data.messages[0]?.data ?? data.messages[0];
   }
   if (!object(data)) invalid('invalid message json.');
-  if ('component' in data || data.type === 17)
-    return { component: normalizeComponent(data.component ?? data) };
+  if ('component' in data) {
+    const card = normalizeCard({ title: 'imported card', ...data });
+    delete card.buttons;
+    delete card.images;
+    for (const key of ['title', 'description', 'url', 'color']) {
+      if (!(key in data)) delete card[key];
+    }
+    return card;
+  }
+  if (data.type === 17) return componentCard([data]);
   if (data.type === 'rich' || 'title' in data || 'description' in data) data = { embeds: [data] };
   if (data.attachments?.length || data.files?.length || data.poll || data.sticker_ids?.length)
     invalid('attachments, polls, and stickers cannot be imported into a link card.');
   const embeds = data.embeds ?? [];
   if (!Array.isArray(embeds) || embeds.length > 1) invalid('import one embed at a time.');
-  const roots = embeds.map(richEmbed);
   if (embeds[0]?.type === 'components') {
-    if (data.content || data.components?.length)
-      invalid('import one container without additional content.');
-    return { component: roots[0] };
+    if (
+      data.content ||
+      (data.components !== undefined && (!Array.isArray(data.components) || data.components.length))
+    )
+      invalid('import card containers without additional content.');
+    return componentCard(embeds[0].components);
   }
+  const roots = embeds.map(richEmbed);
   const blocks = roots.flatMap((root) => root.components);
   if (nonempty(data.content)) blocks.unshift(text(data.content));
   if (data.content != null && typeof data.content !== 'string')
@@ -161,12 +191,10 @@ export function importCardJson(value) {
       else blocks.push(component);
     }
   }
-  // A website preview has one container; never flatten multiple container styles.
-  const containers = roots.filter((root) => root.type === 17);
   if (data.components?.some((component) => component?.type === 17)) {
-    if (containers.length !== 1 || blocks.length)
-      invalid('import one container without additional content.');
-    return { component: normalizeComponent(containers[0]) };
+    if (embeds.length || blocks.length)
+      invalid('import card containers without additional content.');
+    return componentCard(roots);
   }
   const component = normalizeComponent({
     type: 17,
@@ -183,10 +211,11 @@ export function importCardJson(value) {
 }
 
 export function messageJson(card) {
+  const components = [normalizeComponent(buildEmbed(card).component)];
   return JSON.stringify(
     {
       flags: 32768,
-      components: [normalizeComponent(buildEmbed(card).component)],
+      components,
       allowed_mentions: { parse: [] },
     },
     null,

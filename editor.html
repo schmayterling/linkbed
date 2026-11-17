@@ -208,19 +208,6 @@
             </section>
             <div class="form-section first-section">
               <div class="card-titlebar"><h2 class="form-section-heading">link details</h2></div>
-              <label for="source-url">destination url (optional)</label>
-              <input
-                id="source-url"
-                type="url"
-                placeholder="https://example.com"
-                aria-describedby="destination-hint"
-                maxlength="2048"
-                autocomplete="url"
-              />
-              <p id="destination-hint" class="hint">leave blank to keep visitors on this card.</p>
-              <button type="button" class="text-button template-link" id="show-url-import">
-                <span data-icon="link"></span>use this link’s embed as a template
-              </button>
               <label for="title">card name</label>
               <input id="title" maxlength="256" required placeholder="your card" />
               <label for="slug">custom link</label>
@@ -238,65 +225,205 @@
                 />
               </div>
               <p id="slug-hint" class="hint"></p>
-              <details class="metadata-options">
-                <summary>fallback description<span data-icon="chevron-down"></span></summary>
-                <label for="description" class="sr-only">fallback description</label>
-                <textarea id="description" rows="2" maxlength="4096"></textarea>
-              </details>
+              <label for="source-url">destination url (optional)</label>
+              <input
+                id="source-url"
+                type="url"
+                placeholder="https://example.com"
+                aria-describedby="destination-hint"
+                maxlength="2048"
+                autocomplete="url"
+              />
+              <p id="destination-hint" class="hint">leave blank to keep visitors on this card.</p>
+              <button type="button" class="text-button template-link" id="show-url-import">
+                <span data-icon="link"></span>use this link’s embed as a template
+              </button>
             </div>
-            <section class="form-section appearance-options" aria-labelledby="appearance-heading">
-              <div class="card-titlebar">
-                <h2 class="form-section-heading" id="appearance-heading">appearance</h2>
+            <details id="perk-management" class="form-section perk-settings" hidden>
+              <summary class="card-titlebar">
+                <h2 class="form-section-heading">perk management</h2>
+                <span data-icon="chevron-down"></span>
+              </summary>
+              <label class="check-field" for="show-sponsor">
+                <span>show sponsor badge</span>
+                <input id="show-sponsor" type="checkbox" role="switch" checked />
+              </label>
+            </details>
+            <details class="form-section seo-settings">
+              <summary class="card-titlebar">
+                <h2 class="form-section-heading">link metadata + previews</h2>
+                <span data-icon="chevron-down"></span>
+              </summary>
+              <p class="hint">
+                make changes to your default embed card (for platforms outside of discord).<br />
+                these are automatically generated.. well unless you change them.
+              </p>
+              <label for="seo-title">page title</label>
+              <input id="seo-title" maxlength="256" placeholder="use card name" />
+              <label for="description">description</label>
+              <textarea
+                id="description"
+                rows="2"
+                maxlength="4096"
+                placeholder="use preview card text"
+              ></textarea>
+              <label for="seo-image">image url</label>
+              <input
+                id="seo-image"
+                type="url"
+                maxlength="2048"
+                placeholder="use preview card image"
+              />
+              <label for="seo-favicon">favicon url</label>
+              <input
+                id="seo-favicon"
+                type="url"
+                maxlength="2048"
+                placeholder="use linkbed favicon"
+              />
+              <div class="seo-actions">
+                <button id="reset-seo" type="button" class="text-button">reset to defaults</button>
               </div>
-              <div class="color-field">
-                <label for="color">accent</label>
-                <div class="clr-field">
-                  <button type="button" aria-label="choose accent color"></button
-                  ><input
-                    id="color"
-                    type="text"
-                    value="#5865f2"
-                    maxlength="7"
-                    pattern="#[0-9a-fA-F]{6}"
-                    spellcheck="false"
-                    autocomplete="off"
-                    aria-label="accent color"
-                    data-coloris
-                  />
+              <div class="seo-preview" aria-label="link preview">
+                <img id="seo-preview-image" alt="" referrerpolicy="no-referrer" hidden />
+                <div>
+                  <div class="seo-preview-site">
+                    <img
+                      id="seo-preview-icon"
+                      alt=""
+                      width="16"
+                      height="16"
+                      referrerpolicy="no-referrer"
+                      hidden
+                    /><span id="seo-preview-host"></span>
+                  </div>
+                  <strong id="seo-preview-title"></strong>
+                  <p id="seo-preview-description"></p>
                 </div>
-                <label class="check-field"
-                  >none<input type="checkbox" role="switch" id="no-accent" /></label
-                ><label class="check-field"
-                  >spoiler<input type="checkbox" role="switch" id="card-spoiler"
+              </div>
+            </details>
+            <section class="form-section page-management" aria-labelledby="page-management-heading">
+              <div class="card-titlebar">
+                <h2 class="form-section-heading" id="page-management-heading">page management</h2>
+                <label class="check-field page-tools-toggle"
+                  ><span>enable</span
+                  ><input
+                    id="enable-page-tools"
+                    type="checkbox"
+                    role="switch"
+                    aria-label="enable page tools"
                 /></label>
               </div>
-            </section>
-            <div class="form-section content-section">
-              <div class="card-titlebar">
-                <h2 class="form-section-heading">content</h2>
-                <span class="field-meta" id="component-count">8 / 40 · 0 / 10 media</span>
-              </div>
-              <div id="component-list"></div>
-              <h3 class="add-component-heading">add a new component</h3>
-              <div class="add-component">
-                <label class="sr-only" for="component-type">component type</label>
-                <select id="component-type">
-                  <option value="10">text</option>
-                  <option value="9">section + thumbnail</option>
-                  <option value="12">image / video gallery</option>
-                  <option value="1">link buttons</option>
-                  <option value="14">separator</option>
-                </select>
-                <button type="button" id="add-component" class="button secondary small">
-                  <span data-icon="plus"></span>add
-                </button>
-              </div>
-              <p class="templates">
-                template: <button type="button" data-template="launch">launch</button
-                ><button type="button" data-template="portfolio">portfolio</button
-                ><button type="button" data-template="event">event</button>
+              <p class="hint">
+                build a page with up to 7 cards. leave the destination blank so visitors can see it.
               </p>
+              <details class="component-editor page-appearance" hidden>
+                <summary class="card-titlebar">
+                  <span class="block-toggle"
+                    ><span class="block-title">page appearance</span
+                    ><span data-icon="chevron-down"></span
+                  ></span>
+                </summary>
+                <label for="page-theme">default theme</label>
+                <select id="page-theme">
+                  <option value="auto">follow visitor</option>
+                  <option value="light">always light</option>
+                  <option value="dark">always dark</option>
+                </select>
+                <label for="page-color-scheme">color scheme</label>
+                <select id="page-color-scheme">
+                  <option value="auto">separate light and dark colors</option>
+                  <option value="light">use light colors for both</option>
+                  <option value="dark">use dark colors for both</option>
+                </select>
+                <div class="page-palettes">
+                  <fieldset>
+                    <legend>light mode</legend>
+                    <div class="palette-fields" data-palette="light"></div>
+                  </fieldset>
+                  <fieldset>
+                    <legend>dark mode</legend>
+                    <div class="palette-fields" data-palette="dark"></div>
+                  </fieldset>
+                </div>
+                <button id="reset-page-appearance" type="button" class="text-button">
+                  reset to defaults
+                </button>
+              </details>
+              <div id="page-management-controls" hidden>
+                <label for="embed-card-choice">link preview card</label
+                ><select id="embed-card-choice">
+                  <option value="auto">automatic · first card</option>
+                </select>
+                <p id="page-link-warning" class="hint page-link-warning" role="status" hidden>
+                  you have a link configured, so this is the only card shown in the embed.
+                </p>
+              </div>
+            </section>
+            <div id="page-card-editors">
+              <section class="form-section card-editor" aria-labelledby="appearance-heading">
+                <div class="card-titlebar">
+                  <h2 class="form-section-heading" id="appearance-heading">card</h2>
+                </div>
+                <div id="page-card-fields" role="region" aria-labelledby="appearance-heading">
+                  <div class="color-field">
+                    <label for="color">accent</label>
+                    <div class="clr-field">
+                      <button type="button" aria-label="choose accent color"></button
+                      ><input
+                        id="color"
+                        type="text"
+                        value="#5865f2"
+                        maxlength="7"
+                        pattern="#[0-9a-fA-F]{6}"
+                        spellcheck="false"
+                        autocomplete="off"
+                        aria-label="accent color"
+                        data-coloris
+                      />
+                    </div>
+                    <label class="check-field"
+                      >none<input type="checkbox" role="switch" id="no-accent" /></label
+                    ><label class="check-field"
+                      >spoiler<input type="checkbox" role="switch" id="card-spoiler"
+                    /></label>
+                  </div>
+                  <div class="content-heading">
+                    <h3>content</h3>
+                    <span class="field-meta" id="component-count">8 / 40 · 0 / 10 media</span>
+                  </div>
+                  <div id="component-list"></div>
+                  <h3 class="add-component-heading">add a new component</h3>
+                  <div class="add-component">
+                    <label class="sr-only" for="component-type">component type</label>
+                    <select id="component-type">
+                      <option value="10">text</option>
+                      <option value="9">section + thumbnail</option>
+                      <option value="12">image / video gallery</option>
+                      <option value="1">link buttons</option>
+                      <option value="14">separator</option>
+                    </select>
+                    <button type="button" id="add-component" class="button secondary small">
+                      <span data-icon="plus"></span>add
+                    </button>
+                  </div>
+                  <p class="templates">
+                    template: <button type="button" data-template="launch">launch</button
+                    ><button type="button" data-template="portfolio">portfolio</button
+                    ><button type="button" data-template="event">event</button>
+                  </p>
+                </div>
+              </section>
             </div>
+            <div id="page-card-actions" hidden>
+              <button type="button" id="add-page-card" class="button secondary small" hidden>
+                <span data-icon="plus"></span>add card
+              </button>
+              <button type="button" id="add-badge-case" class="button secondary small">
+                <span data-icon="plus"></span>add badge case
+              </button>
+            </div>
+            <span id="cards-status" class="sr-only" role="status"></span>
 
             <section class="danger-zone" aria-labelledby="danger-heading">
               <div class="card-titlebar"><h2 id="danger-heading">danger zone</h2></div>
@@ -314,7 +441,33 @@
           <aside class="preview-panel" id="live-preview" aria-label="discord preview">
             <div class="discord-window" data-preview-theme="dark">
               <div class="channel-bar">
-                <div class="channel-name"><span aria-hidden="true">#</span> showcase</div>
+                <div
+                  id="preview-scope"
+                  class="preview-scope"
+                  role="group"
+                  aria-label="preview"
+                  hidden
+                >
+                  <button
+                    type="button"
+                    class="text-button"
+                    data-preview-mode="discord"
+                    aria-pressed="true"
+                  >
+                    discord
+                  </button>
+                  <button
+                    type="button"
+                    class="text-button"
+                    data-preview-mode="page"
+                    aria-pressed="false"
+                  >
+                    page
+                  </button>
+                </div>
+                <div class="channel-name">
+                  <span aria-hidden="true">#</span> <span id="preview-heading">showcase</span>
+                </div>
                 <div class="preview-controls">
                   <span id="byte-count" class="field-meta">693 / 3,000 bytes</span>
                   <div class="preview-themes" role="group" aria-label="discord preview theme">
@@ -338,7 +491,7 @@
                   </div>
                 </div>
               </div>
-              <div class="discord-message">
+              <div class="discord-message" id="discord-preview-message">
                 <img
                   class="discord-avatar"
                   src="https://github.com/schmayterling.png"
@@ -351,6 +504,7 @@
                   <article class="discord-card" id="preview-card"></article>
                 </div>
               </div>
+              <div id="page-preview-cards" class="page-preview-cards" hidden></div>
             </div>
           </aside>
         </div>
@@ -442,6 +596,14 @@
           spellcheck="false"
           autofocus
         />
+        <label for="report-reason">reason</label>
+        <select id="report-reason" required>
+          <option value="">choose a reason</option>
+        </select>
+        <div id="report-details-field" hidden>
+          <label for="report-details">tell me why</label
+          ><input id="report-details" maxlength="2000" />
+        </div>
         <label class="confirm-field" for="report-confirm"
           ><input
             id="report-confirm"
@@ -625,6 +787,7 @@
         </div>
       </div>
     </dialog>
+
     <dialog
       id="confirm-dialog"
       class="tool-dialog confirm-dialog"
