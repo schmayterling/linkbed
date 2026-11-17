@@ -1224,6 +1224,13 @@ body[data-view='admin'] main {
 .tool-dialog .hint {
   margin: 0 0 12px;
 }
+#report-form > label[for='report-reason'],
+#report-details-field {
+  margin-top: 16px;
+}
+#report-form :is(input:not([type='checkbox']), select) {
+  min-height: var(--control-height);
+}
 #embed-mode {
   margin-bottom: 14px;
 }
