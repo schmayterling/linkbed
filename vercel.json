@@ -29,6 +29,10 @@
     {
       "source": "/:slug([a-z0-9-]+)",
       "destination": "/api/index?card=:slug"
+    },
+    {
+      "source": "/:path*",
+      "destination": "/api/index?notfound=1"
     }
   ],
   "headers": [

@@ -11,7 +11,7 @@ import {
   embedJson,
 } from './public/model.mjs';
 import { fetchMetadata, publicUrl } from './metadata.mjs';
-import { renderCard, renderEditor } from './render.mjs';
+import { renderCard, renderEditor, renderNotFound } from './render.mjs';
 
 export const securityHeaders = {
   'x-content-type-options': 'nosniff',
@@ -215,6 +215,7 @@ export function createHandler(options = {}) {
     for (const [key, value] of Object.entries(securityHeaders)) res.setHeader(key, value);
     if (canonical.startsWith('https:'))
       res.setHeader('strict-transport-security', 'max-age=31536000');
+    let pageRequest = false;
     try {
       const url = new URL(req.url, canonical);
       let path = url.pathname;
@@ -232,6 +233,11 @@ export function createHandler(options = {}) {
         path.startsWith('/api/admin/');
       if (path === '/p/admin' || (admin && !options.allowAdmin?.(req)))
         throw fail(404, 'page not found.');
+      pageRequest = !path.startsWith('/api/') && !admin && path !== '/healthz';
+      if (path === '/api/index' && url.searchParams.has('notfound')) {
+        pageRequest = true;
+        throw fail(404, 'page not found.');
+      }
       const write = !['GET', 'HEAD'].includes(req.method);
       if (
         write &&
@@ -711,11 +717,19 @@ export function createHandler(options = {}) {
       throw fail(404, 'page not found.');
     } catch (error) {
       if (!error.status) console.error('lembed request failed:', error.code || error.name);
-      if (!res.headersSent)
+      if (!res.headersSent) {
+        if (error.status === 404 && pageRequest && ['GET', 'HEAD'].includes(req.method)) {
+          res.writeHead(404, {
+            'content-type': 'text/html; charset=utf-8',
+            'cache-control': 'no-store',
+            'x-robots-tag': 'noindex',
+          });
+          return res.end(req.method === 'HEAD' ? undefined : renderNotFound(canonical + '/'));
+        }
         json(res, error.status || 500, {
           error: error.status ? error.message : 'service unavailable. try again shortly.',
         });
-      else res.end();
+      } else res.end();
     }
   }
   handle.close = async () => {

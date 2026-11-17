@@ -28,6 +28,34 @@ ${starter ? `<script id="starter-card" type="application/json">${JSON.stringify(
     .replaceAll('<!-- public host -->', e(new URL(url).host));
 }
 
+export function renderNotFound(origin) {
+  return `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>404 | linkbed</title>
+<meta name="description" content="this link does not exist or has been suspended">
+<meta name="robots" content="noindex">
+<meta property="og:title" content="404 | linkbed">
+<meta property="og:description" content="this link does not exist or has been suspended">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="linkbed">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="404 | linkbed">
+<meta name="twitter:description" content="this link does not exist or has been suspended">
+<link rel="icon" href="https://github.com/schmayterling.png?size=64" type="image/png">
+<link rel="stylesheet" href="/style.css">
+</head><body class="public-page not-found-page">
+<main class="public-content not-found-content">
+<div class="not-found-art">
+<img src="/not-found.gif" alt="" width="498" height="203">
+<h1>404</h1>
+</div>
+<p>this link does not exist or has been suspended</p>
+<a class="button secondary" href="${escapeHtml(origin)}">back to ${escapeHtml(new URL(origin).host)}</a>
+</main>
+</body></html>`;
+}
+
 export function renderCard(card, url) {
   const e = escapeHtml;
   const redirect = card.url && !isSelfDestination(card.url, url);
@@ -61,7 +89,7 @@ ${imageUrls.map((image) => `<meta property="og:image" content="${e(image)}">`).j
 ${card.color ? `<meta name="theme-color" content="${e(card.color)}">` : ''}
 <link rel="icon" href="https://github.com/schmayterling.png?size=64" type="image/png">
 <link rel="stylesheet" href="/style.css">
-${redirect ? '<script type="module" src="/redirect.mjs"></script>' : ''}
+<script type="module" src="${redirect ? '/redirect.mjs' : '/card.mjs'}"></script>
 ${embedScript(card)}
 </head><body class="public-page${redirect ? ' redirect-page' : ''}">
 ${
@@ -72,12 +100,14 @@ ${
 <a class="redirect-link" data-redirect href="${e(card.url)}" rel="noopener noreferrer">${e(card.url)}</a>
 </div></main>`
     : `<header class="public-header"><a class="brand" href="/">linkbed</a><a class="text-link" href="/">make your own card ↗</a></header>
-<main class="public-content"><article class="published-card">
-<p class="eyebrow">shared with linkbed</p><h1>${e(card.title)}</h1>
-<p class="published-description">${e(card.description)}</p>
+<main class="public-content">
+<div class="discord-window public-card-preview"><article id="public-card" class="discord-card" aria-label="${e(card.title)}"></article></div>
+<noscript><article class="published-card">
+<h1>${e(card.title)}</h1><p class="published-description">${e(card.description)}</p>
 ${images ? `<div class="published-gallery">${images}</div>` : ''}
 <div class="published-buttons">${buttons}</div>
-</article><p class="public-note">paste this page’s link in discord to share its card.</p></main>`
+</article></noscript>
+<p class="public-note">paste this page’s link in discord to share its card.</p></main>`
 }
 </body></html>`;
 }

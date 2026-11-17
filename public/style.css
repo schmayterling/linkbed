@@ -1707,13 +1707,52 @@ details[open] > summary {
   margin: auto;
   padding-top: 42px;
 }
-.redirect-page .public-content {
+.redirect-page .public-content,
+.not-found-page .public-content {
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 100dvh;
   padding: 24px 0;
   text-align: center;
+}
+.not-found-content {
+  flex-direction: column;
+  gap: 20px;
+}
+.not-found-art {
+  position: relative;
+  width: min(100%, 498px);
+  container-type: inline-size;
+  isolation: isolate;
+}
+.not-found-art img {
+  display: block;
+  position: relative;
+  width: 100%;
+  height: auto;
+  z-index: 3;
+  animation: horse-depth 4.1s step-end infinite;
+}
+@keyframes horse-depth {
+  50% {
+    z-index: 1;
+  }
+}
+.not-found-art h1 {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  font-size: 40cqw;
+  font-weight: 600;
+  line-height: 1;
+  opacity: 0.25;
+  z-index: 2;
+}
+.not-found-content p {
+  font-size: 1rem;
 }
 .redirect-status {
   display: flex;
@@ -1744,9 +1783,14 @@ details[open] > summary {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .redirect-spinner {
+  .redirect-spinner,
+  .not-found-art img {
     animation: none;
   }
+}
+.discord-window.public-card-preview {
+  min-height: 0;
+  background: transparent;
 }
 .published-card h1 {
   margin-bottom: 15px;

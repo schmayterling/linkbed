@@ -58,7 +58,9 @@ test('standalone cards can be created, opened, updated and returned to without a
       assert.match(html, /discord:component-embed/);
       assert.match(html, /no redirect needed/);
       assert.doesNotMatch(html, /src="\/redirect.mjs"|data-redirect|redirect-spinner/);
-      assert.match(html, /class="published-card"/);
+      assert.match(html, /id="public-card" class="discord-card"/);
+      assert.match(html, /src="\/card.mjs"/);
+      assert.match(html, /<noscript><article class="published-card"/);
     }
     const publicJson = await request('/api/embeds/standalone');
     assert.equal(publicJson.status, 200);
