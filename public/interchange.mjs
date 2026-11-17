@@ -9,7 +9,10 @@ const text = (content) => ({ type: 10, content });
 const nonempty = (value) => typeof value === 'string' && value.trim();
 
 export function linkedEmbedCode(pageUrl, sourceUrl) {
-  const href = publicHttpUrl(new URL('/linkbed.json', pageUrl).href, 'website url');
+  const href = publicHttpUrl(
+    new URL('/linkbed.json', pageUrl || 'https://your-site.com/').href,
+    'website url',
+  );
   const escaped = href.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
   return {
     head: '<link rel="discord:component-embed" type="application/json" href="' + escaped + '">',

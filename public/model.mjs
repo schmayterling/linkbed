@@ -36,6 +36,7 @@ export function httpsUrl(value, label = 'url', max = 2048) {
 }
 
 export function isSelfDestination(value, pageUrl) {
+  if (value == null) return false;
   const destination = new URL(value);
   const page = new URL(pageUrl);
   const hosts = [page.hostname, 'linkbed.me', 'www.linkbed.me', 'linkbed.ryana.dev'];
@@ -54,6 +55,7 @@ export function isSelfDestination(value, pageUrl) {
 }
 
 export function destinationUrl(value, pageUrl) {
+  if (value == null || (typeof value === 'string' && !value.trim())) return null;
   const url = httpsUrl(value, 'destination url');
   if (pageUrl && isSelfDestination(url, pageUrl))
     throw new ValidationError('destination url cannot be this card’s own link.');

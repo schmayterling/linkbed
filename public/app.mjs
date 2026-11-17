@@ -253,7 +253,7 @@ function draft() {
   return {
     title: fields.title.value.trim(),
     description: fields.description.value.trim(),
-    url: fields.url.value.trim(),
+    url: fields.url.value.trim() || null,
     color: $('#no-accent').checked ? null : fields.color.value,
     component: composer.get(),
   };
@@ -368,6 +368,9 @@ function update() {
     if (embedReady) {
       try {
         const code = linkedEmbedCode(card.url, publicOrigin + '/api/embeds/' + editing);
+        if (!card.url)
+          $('#embed-hint').textContent =
+            'replace your-site.com with your website’s domain, then add this code to its html head and the server route below.';
         $('#embed-code').value = code.head;
         $('#embed-route').value = code.route;
       } catch (error) {

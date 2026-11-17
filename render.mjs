@@ -30,7 +30,7 @@ ${starter ? `<script id="starter-card" type="application/json">${JSON.stringify(
 
 export function renderCard(card, url) {
   const e = escapeHtml;
-  const selfDestination = isSelfDestination(card.url, url);
+  const redirect = card.url && !isSelfDestination(card.url, url);
   const imageUrls = card.images.filter((image) => !/\.(mp4|webm|mov)(?:$|[?#])/i.test(image));
   const images = imageUrls
     .map(
@@ -61,7 +61,7 @@ ${imageUrls.map((image) => `<meta property="og:image" content="${e(image)}">`).j
 ${card.color ? `<meta name="theme-color" content="${e(card.color)}">` : ''}
 <link rel="icon" href="https://github.com/schmayterling.png?size=64" type="image/png">
 <link rel="stylesheet" href="/style.css">
-${selfDestination ? '' : '<script type="module" src="/redirect.mjs"></script>'}
+${redirect ? '<script type="module" src="/redirect.mjs"></script>' : ''}
 ${embedScript(card)}
 </head><body class="public-page">
 <header class="public-header"><a class="brand" href="/">linkbed</a><a class="text-link" href="/">make your own card ↗</a></header>
@@ -70,7 +70,7 @@ ${embedScript(card)}
 <p class="published-description">${e(card.description)}</p>
 ${images ? `<div class="published-gallery">${images}</div>` : ''}
 <div class="published-buttons">${buttons}</div>
-${selfDestination ? '' : `<a class="destination" data-redirect href="${e(card.url)}" rel="noopener noreferrer">${e(new URL(card.url).hostname)} ↗</a>`}
+${redirect ? `<a class="destination" data-redirect href="${e(card.url)}" rel="noopener noreferrer">${e(new URL(card.url).hostname)} ↗</a>` : ''}
 </article><p class="public-note">paste this page’s link in discord to share its card.</p></main>
 </body></html>`;
 }

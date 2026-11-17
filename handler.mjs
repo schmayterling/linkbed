@@ -634,7 +634,7 @@ export function createHandler(options = {}) {
         if (forbidden.rows.length) throw fail(403, 'this link is banned.');
         const now = Date.now();
         const card = normalizeCard(input, `${canonical}/${slug}`);
-        publicUrl(card.url);
+        if (card.url) publicUrl(card.url);
         for (const link of componentUrls(buildEmbed(card).component))
           publicUrl(link, 'component url', true);
         let result;

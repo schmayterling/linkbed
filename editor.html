@@ -188,15 +188,16 @@
             </section>
             <div class="form-section first-section">
               <div class="card-titlebar"><h2 class="form-section-heading">link details</h2></div>
-              <label for="source-url">destination url</label>
+              <label for="source-url">destination url (optional)</label>
               <input
                 id="source-url"
                 type="url"
                 placeholder="https://example.com"
-                required
+                aria-describedby="destination-hint"
                 maxlength="2048"
                 autocomplete="url"
               />
+              <p id="destination-hint" class="hint">leave blank to keep visitors on this card.</p>
               <button type="button" class="text-button template-link" id="show-url-import">
                 <span data-icon="link"></span>use this link’s embed as a template
               </button>

@@ -10,6 +10,10 @@ test('live embed stays on the destination host and proxies only bounded public J
     '<link rel="discord:component-embed" type="application/json" href="https://ryanaque.com/linkbed.json">',
   );
   assert.throws(() => linkedEmbedCode('javascript:alert(1)', source));
+  assert.equal(
+    linkedEmbedCode(null, source).head,
+    '<link rel="discord:component-embed" type="application/json" href="https://your-site.com/linkbed.json">',
+  );
   const { GET } = await import(
     'data:text/javascript;base64,' + Buffer.from(code.route).toString('base64')
   );

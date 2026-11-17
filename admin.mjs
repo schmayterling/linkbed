@@ -252,7 +252,13 @@ function renderRow(kind, item) {
     cell(
       title,
       openLink(item.link, '/' + item.slug),
-      ...(kind === 'links' ? [openLink(item.destination, item.destination)] : []),
+      ...(kind === 'links'
+        ? [
+            item.destination
+              ? openLink(item.destination, item.destination)
+              : element('span', 'none', 'muted'),
+          ]
+        : []),
     );
     if (kind === 'reports') {
       cell(element('code', shortHash(item.reporter_fingerprint)));
