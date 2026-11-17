@@ -96,6 +96,15 @@ export function publicHttpUrl(value, label = 'url', max = 2048) {
   return publicUrl(value, label, max, true);
 }
 
+export function badgeLinkUrl(value) {
+  if (typeof value === 'string' && /^mailto:/i.test(value)) {
+    if (value.length > 261 || !/^mailto:[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,63}$/i.test(value))
+      throw new ValidationError('use a single email address without a subject or body.');
+    return 'mailto:' + value.slice(7);
+  }
+  return publicHttpUrl(value, 'badge link url');
+}
+
 export function text(value, label, max, required = false) {
   if (typeof value !== 'string' || (required && !value.trim())) {
     throw new ValidationError(`${label} ${required ? 'is required' : 'must be text'}.`);
@@ -329,7 +338,7 @@ export function normalizePageCard(root) {
     badges: root.badges.map((badge) => {
       object(badge, ['image', 'url', 'label'], 'badge');
       const result = { image: publicHttpUrl(badge.image, 'badge image url') };
-      if ('url' in badge) result.url = publicHttpUrl(badge.url, 'badge link url');
+      if ('url' in badge) result.url = badgeLinkUrl(badge.url);
       if ('label' in badge) result.label = text(badge.label, 'badge label', 80);
       return result;
     }),
@@ -468,7 +477,7 @@ export function componentUrls(component) {
     if (isBadgeCase(node) && Array.isArray(node.badges)) {
       for (const badge of node.badges) {
         if (typeof badge?.image === 'string') urls.push(badge.image);
-        if (typeof badge?.url === 'string') urls.push(badge.url);
+        if (typeof badge?.url === 'string' && !/^mailto:/i.test(badge.url)) urls.push(badge.url);
       }
     }
     if (node.type === 2 && typeof node.url === 'string') urls.push(node.url);

@@ -31,6 +31,7 @@
   input(field('description'), '**handmade** badges\n\n[visit](https://example.com)');
   input(field('image url'), 'https://example.com/badge.gif');
   input(field('alt text'), 'handmade badge');
+  input(field('link (optional)'), 'mailto:hey@ryanaque.com');
   input($('#no-accent'), false);
   input($('#color'), '#6543ab');
   input($('#card-spoiler'), true);
@@ -56,6 +57,11 @@
   check(
     [...preview.children].every((node) => !node.inert),
     'reveal restores interaction',
+  );
+  const emailLink = preview.querySelector('.badge-collection a');
+  check(
+    emailLink?.href === 'mailto:hey@ryanaque.com' && !emailLink.target,
+    'email badge opens the mail client',
   );
   const image = preview.querySelector('img');
   check(

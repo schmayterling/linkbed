@@ -1,6 +1,7 @@
 import MarkdownIt from './vendor/markdown-it.mjs';
 import {
   publicHttpUrl,
+  badgeLinkUrl,
   text as validateText,
   normalizeEmoji,
   thumbnailUrl,
@@ -250,8 +251,8 @@ export function renderComponent(container, component) {
         image.src = publicHttpUrl(badge.image, 'badge image', 2048);
         if (badge.url) {
           const link = el('a');
-          link.href = publicHttpUrl(badge.url, 'badge link', 2048);
-          link.target = '_blank';
+          link.href = badgeLinkUrl(badge.url);
+          if (link.protocol !== 'mailto:') link.target = '_blank';
           link.rel = 'noopener noreferrer';
           link.append(image);
           badges.append(link);
@@ -821,7 +822,7 @@ export function createComposer(container, onChange) {
         optional: true,
         placeholder: 'https://example.com',
         validate: (value) => {
-          if (value) publicHttpUrl(value, 'badge link', 2048);
+          if (value) badgeLinkUrl(value);
         },
       },
     );

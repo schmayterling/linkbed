@@ -106,6 +106,34 @@ test('badge cases normalize strict page-only fields and independent limits', () 
   assert.throws(() => normalizeComponent({ type: 17, components: [badgeCase()] }), { status: 400 });
 });
 
+test('email clickies stay page-only and cannot carry email headers', () => {
+  const email = { ...badge, url: 'mailto:hey@ryanaque.com' };
+  const root = normalizePageCard(badgeCase([email]));
+  assert.equal(root.badges[0].url, email.url);
+  assert.deepEqual(componentUrls(root), [badge.image]);
+  assert.deepEqual(cardComponents(importCardJson(page([normal(), root])))[1], root);
+  for (const url of [
+    'mailto:',
+    'mailto:a@b',
+    'mailto:a@example.com?subject=test',
+    'mailto:a@example.com%0d%0aBcc:evil@example.com',
+    'mailto:a@example.com,b@example.com',
+    'javascript:alert(1)',
+  ]) {
+    assert.throws(() => normalizePageCard(badgeCase([{ ...badge, url }])), { status: 400 });
+  }
+  assert.throws(
+    () =>
+      normalizeComponent({
+        type: 17,
+        components: [
+          { type: 1, components: [{ type: 2, style: 5, label: 'mail', url: email.url }] },
+        ],
+      }),
+    { status: 400 },
+  );
+});
+
 test('badge cards preserve shared appearance and descriptions without affecting link previews', () => {
   const first = normal();
   for (const accent_color of [null, 0, 0xabcdef]) {
@@ -283,7 +311,7 @@ test('temporary-db API saves mixed content, preserves selection and rejects priv
         description: '**page-only collection**',
       },
       first,
-      badgeCase(),
+      badgeCase([{ ...badge, url: 'mailto:hey@ryanaque.com' }]),
       last,
     ];
     const response = await request('/api/cards', 'POST', {

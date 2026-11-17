@@ -120,6 +120,7 @@ export function renderCard(card, url, { sponsoredAt, verifiedAt, customBadges = 
         `<a class="button" href="${e(button.url)}" target="_blank" rel="noopener noreferrer">${e(button.label)} <span aria-hidden="true">↗</span></a>`,
     )
     .join('');
+  // ponytail: render blocking prevents startup shifts in supporting browsers; use SSR for universal coverage.
   return `<!doctype html>
 <html lang="en"${!redirect && card.page_theme ? ` data-theme="${e(card.page_theme)}"` : ''}><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -139,7 +140,7 @@ ${image ? `<meta name="twitter:image" content="${e(image)}">` : ''}
 ${color ? `<meta name="theme-color" content="${e(color)}">` : ''}
 <link rel="icon" href="${e(card.seo?.favicon || 'https://github.com/schmayterling.png?size=64')}">
 <link rel="stylesheet" href="/style.css">
-<script type="module" src="${redirect ? '/redirect.mjs' : '/card.mjs'}"></script>
+<script type="module"${redirect ? '' : ' blocking="render"'} src="${redirect ? '/redirect.mjs' : '/card.mjs'}"></script>
 ${embedScript(card)}
 ${appearance ? `<script id="page-appearance" type="application/json">${JSON.stringify(appearance).replace(/</g, '\\u003c')}</script>` : ''}
 ${!redirect && card.additional_cards?.length ? `<script id="page-cards" type="application/json">${JSON.stringify(cardComponents(card)).replace(/</g, '\\u003c')}</script>` : ''}
