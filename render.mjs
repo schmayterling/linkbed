@@ -63,14 +63,21 @@ ${card.color ? `<meta name="theme-color" content="${e(card.color)}">` : ''}
 <link rel="stylesheet" href="/style.css">
 ${redirect ? '<script type="module" src="/redirect.mjs"></script>' : ''}
 ${embedScript(card)}
-</head><body class="public-page">
-<header class="public-header"><a class="brand" href="/">linkbed</a><a class="text-link" href="/">make your own card ↗</a></header>
+</head><body class="public-page${redirect ? ' redirect-page' : ''}">
+${
+  redirect
+    ? `<main class="public-content"><div class="redirect-status">
+<span class="redirect-spinner" aria-hidden="true"></span>
+<p role="status">redirecting to</p>
+<a class="redirect-link" data-redirect href="${e(card.url)}" rel="noopener noreferrer">${e(card.url)}</a>
+</div></main>`
+    : `<header class="public-header"><a class="brand" href="/">linkbed</a><a class="text-link" href="/">make your own card ↗</a></header>
 <main class="public-content"><article class="published-card">
 <p class="eyebrow">shared with linkbed</p><h1>${e(card.title)}</h1>
 <p class="published-description">${e(card.description)}</p>
 ${images ? `<div class="published-gallery">${images}</div>` : ''}
 <div class="published-buttons">${buttons}</div>
-${redirect ? `<a class="destination" data-redirect href="${e(card.url)}" rel="noopener noreferrer">${e(new URL(card.url).hostname)} ↗</a>` : ''}
-</article><p class="public-note">paste this page’s link in discord to share its card.</p></main>
+</article><p class="public-note">paste this page’s link in discord to share its card.</p></main>`
+}
 </body></html>`;
 }

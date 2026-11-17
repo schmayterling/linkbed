@@ -391,6 +391,8 @@ function update() {
     jsonEditor?.set(value);
   }
   $('#editor-notice').hidden = !editing && !dirty && !usingTemplate;
+  $('#copy-card-link').hidden = !editing;
+  $('#copy-card-link').disabled = busy;
   $('#clear-template').textContent = editing || dirty ? 'clear changes' : 'clear template';
   $('#clear-template').disabled = busy;
   $('#editor-notice').classList.toggle('has-changes', dirty || usingTemplate);
@@ -583,7 +585,13 @@ async function refreshCards() {
         const external = icon('external-link');
         external.classList.add('saved-external');
         url.append(external);
-        footer.append(url, remove);
+        const copyLink = element('button', undefined, 'text-button saved-copy');
+        copyLink.type = 'button';
+        copyLink.append(icon('copy'));
+        copyLink.title = 'copy link';
+        copyLink.setAttribute('aria-label', 'copy link: ' + card.title);
+        copyLink.addEventListener('click', () => copy(cardUrl(card.slug)));
+        footer.append(url, copyLink, remove);
         tile.append(open, footer);
         return tile;
       }),
@@ -740,12 +748,13 @@ async function clearChanges() {
 }
 $('#reset').addEventListener('click', clearChanges);
 $('#clear-template').addEventListener('click', clearChanges);
+$('#copy-card-link').addEventListener('click', () => copy(cardUrl(editing)));
 $('#delete-card').addEventListener('click', () => {
   if (editing) deleteCard(editing, $('#form-status'));
 });
 for (const type of ['focusin', 'click', 'input', 'change'])
   $('#card-form').addEventListener(type, (event) => {
-    if (loading || showErrors || event.target.closest('#clear-template, #reset')) return;
+    if (loading || showErrors || event.target.closest('#editor-notice, #reset')) return;
     showErrors = true;
     update();
   });
@@ -1052,6 +1061,11 @@ $('#card-form').addEventListener('submit', (event) => {
     termsAccepted ||= localStorage.getItem('linkbed-terms-accepted') === 'true';
   } catch {}
   publishForm.reset();
+  publishForm.hidden = false;
+  $('#publish-result').hidden = true;
+  $('#publish-copy-error').textContent = '';
+  $('#copy-published-label').textContent = 'copy link';
+  $('#publish-message').textContent = 'anyone with this link can view your card:';
   publishConfirm.closest('label').hidden = termsAccepted;
   publishConfirm.required = !termsAccepted;
   publishConfirm.autofocus = !termsAccepted;
@@ -1081,7 +1095,13 @@ publishDialog.addEventListener('close', () => {
 });
 publishForm.addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (busy || !publishDialog.open || (!termsAccepted && !publishConfirm.checked)) return;
+  if (
+    busy ||
+    !publishDialog.open ||
+    publishForm.hidden ||
+    (!termsAccepted && !publishConfirm.checked)
+  )
+    return;
   if (validateEditor().length) {
     publishDialog.close();
     setTab('edit');
@@ -1121,8 +1141,13 @@ publishForm.addEventListener('submit', async (event) => {
     confirmPublish.textContent = editing ? 'save changes' : 'publish card';
   }
   if (saved) {
-    publishDialog.close();
-    toast('saved.');
+    $('#publish-heading').textContent = 'your card is ready.';
+    $('#publish-message').textContent = 'copy this link to share your card:';
+    $('#publish-url').textContent = $('#publish-url').href = cardUrl(editing);
+    $('#publish-rename-warning').hidden = true;
+    publishForm.hidden = true;
+    $('#publish-result').hidden = false;
+    $('#copy-published-link').focus();
   }
 });
 
@@ -1130,10 +1155,19 @@ async function copy(text) {
   try {
     await navigator.clipboard.writeText(text);
     toast('copied.');
+    return true;
   } catch {
     toast('could not copy. select text to copy.');
+    return false;
   }
 }
+$('#copy-published-link').addEventListener('click', async () => {
+  const copied = await copy($('#publish-url').href);
+  $('#copy-published-label').textContent = copied ? 'copied!' : 'copy link';
+  $('#publish-copy-error').textContent = copied
+    ? ''
+    : 'could not copy. select the link to copy it.';
+});
 $('#copy-code').addEventListener('click', () => {
   try {
     normalizeComponent(composer.get());

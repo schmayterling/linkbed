@@ -42,10 +42,14 @@ test('existing self-linked cards keep their embed without a redirect or self des
   const saved = normalizeCard({ ...card, url: 'https://linkbed.me/here' });
   const html = renderCard(saved, page);
   assert.match(html, /discord:component-embed/);
-  assert.doesNotMatch(html, /src="\/redirect.mjs"|data-redirect/);
+  assert.doesNotMatch(html, /src="\/redirect.mjs"|data-redirect|redirect-spinner/);
   const normal = renderCard(normalizeCard(card), page);
   assert.match(normal, /src="\/redirect.mjs"/);
   assert.match(normal, /data-redirect href="https:\/\/example.com\/"/);
+  assert.match(normal, /class="redirect-spinner" aria-hidden="true"/);
+  assert.match(normal, /role="status">redirecting to/);
+  assert.doesNotMatch(normal, /class="published-card"|class="public-header"/);
+  assert.match(normal, /discord:component-embed/);
 });
 
 test('api rejects self destinations on creation, update and rename while old cards stay readable', async () => {

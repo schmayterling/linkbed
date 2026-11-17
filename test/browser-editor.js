@@ -30,7 +30,17 @@
   const originalFetch = window.fetch;
   const originalAcceptance = localStorage.getItem('linkbed-terms-accepted');
   let failRead = false;
+  let failWrite = false;
   let writes = 0;
+  let copied = null;
+  const clipboard = navigator.clipboard;
+  const originalWriteText = Object.getOwnPropertyDescriptor(clipboard, 'writeText');
+  Object.defineProperty(clipboard, 'writeText', {
+    configurable: true,
+    value: async (text) => {
+      copied = text;
+    },
+  });
   let card = {
     slug: 'editor-check',
     title: 'saved card',
@@ -54,6 +64,7 @@
         ? Response.json({ error: 'saved card unavailable' }, { status: 503 })
         : Response.json(card);
     if (path === '/api/cards/editor-check' && method === 'PUT') {
+      if (failWrite) return Response.json({ error: 'save failed' }, { status: 503 });
       writes++;
       card = { ...JSON.parse(options.body), slug: 'editor-check' };
       return Response.json(card);
@@ -83,9 +94,17 @@
 
     $('#show-cards').click();
     await wait(() => $('.saved-preview'));
+    const publicUrl = $('.saved-url').href;
+    $('.saved-copy').click();
+    await wait(() => copied === publicUrl);
+    check(document.body.dataset.view === 'cards', 'copying saved link does not open the editor');
     $('.saved-preview').click();
     input('#title', 'unsaved');
     input('#slug', 'renamed');
+    copied = null;
+    $('#copy-card-link').click();
+    await wait(() => copied === publicUrl);
+    check(!$('#copy-card-link').hidden, 'notice copies published slug before an unsaved rename');
     input('#component-list textarea', 'unsaved content');
     $('#clear-template').click();
     $('#confirm-dialog [value="cancel"]').click();
@@ -127,7 +146,20 @@
     $('#publish-button').click();
     $('#publish-confirm').click();
     $('#confirm-publish').click();
+    await wait(() => !$('#publish-result').hidden && !$('#card-form').inert);
+    check(
+      $('#publish-dialog').open && $('#publish-form').hidden,
+      'publish stays open at the copy prompt',
+    );
+    copied = null;
+    $('#copy-published-link').click();
+    await wait(() => copied === publicUrl && $('#copy-published-label').textContent === 'copied!');
+    check(document.activeElement === $('#copy-published-link'), 'success focuses copy action');
+    $('#publish-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    check(writes === 1, 'completed publish cannot submit again');
+    $('#publish-result [data-close]').click();
     await wait(() => !$('#publish-dialog').open);
+    await new Promise((resolve) => setTimeout(resolve, 20));
     check(
       writes === 1 && localStorage.getItem('linkbed-terms-accepted') === 'true',
       'publish remembers agreement',
@@ -141,11 +173,26 @@
       'repeat publish keeps confirmation without checkbox',
     );
     $('#confirm-publish').click();
+    await wait(() => !$('#publish-result').hidden && !$('#card-form').inert);
+    check(writes === 2 && $('#publish-dialog').open, 'repeat publish keeps its copy prompt');
+    $('#publish-result [data-close]').click();
     await wait(() => !$('#publish-dialog').open);
-    check(writes === 2, 'repeat publish works');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    failWrite = true;
+    $('#publish-button').click();
+    $('#confirm-publish').click();
+    await wait(() => $('#publish-error').textContent === 'save failed' && !$('#card-form').inert);
+    check(
+      !$('#publish-form').hidden && $('#publish-result').hidden,
+      'failed publish keeps retry controls',
+    );
+    $('#publish-dialog [data-close]').click();
+    await wait(() => !$('#publish-dialog').open);
     return { passed };
   } finally {
     window.fetch = originalFetch;
+    if (originalWriteText) Object.defineProperty(clipboard, 'writeText', originalWriteText);
+    else delete clipboard.writeText;
     if (originalAcceptance === null) localStorage.removeItem('linkbed-terms-accepted');
     else localStorage.setItem('linkbed-terms-accepted', originalAcceptance);
   }

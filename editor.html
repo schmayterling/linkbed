@@ -176,7 +176,21 @@
               aria-live="polite"
             >
               <p id="editor-notice-text">start with this template, or clear it to make your own.</p>
-              <button id="clear-template" class="text-button" type="button">clear template</button>
+              <div class="editor-notice-actions">
+                <button
+                  id="copy-card-link"
+                  class="text-button"
+                  type="button"
+                  title="copy link"
+                  aria-label="copy published link"
+                  hidden
+                >
+                  <span data-icon="copy"></span>
+                </button>
+                <button id="clear-template" class="text-button" type="button">
+                  clear template
+                </button>
+              </div>
             </aside>
             <section
               id="editor-errors"
@@ -375,7 +389,7 @@
         </button>
       </div>
       <p id="publish-note">
-        anyone with this link can view your card:<br /><a
+        <span id="publish-message">anyone with this link can view your card:</span><br /><a
           id="publish-url"
           target="_blank"
           rel="noopener noreferrer"
@@ -399,6 +413,15 @@
           </button>
         </div>
       </form>
+      <div id="publish-result" hidden>
+        <p id="publish-copy-error" class="form-status" role="status"></p>
+        <div class="dialog-actions">
+          <button type="button" class="button secondary small" data-close>done</button>
+          <button type="button" class="button primary small" id="copy-published-link">
+            <span data-icon="copy"></span><span id="copy-published-label">copy link</span>
+          </button>
+        </div>
+      </div>
     </dialog>
     <dialog id="report-dialog" class="tool-dialog account-dialog" aria-labelledby="report-heading">
       <div class="card-titlebar">

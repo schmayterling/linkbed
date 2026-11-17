@@ -1007,6 +1007,11 @@ body[data-view='admin'] main {
   flex: 0 0 auto;
   font-size: max(var(--text-min), 0.6875rem);
 }
+.saved-copy {
+  flex: 0 0 32px;
+  width: 32px;
+  min-height: 32px;
+}
 .saved-delete {
   margin-left: auto;
   flex: 0 0 auto;
@@ -1622,10 +1627,18 @@ details[open] > summary {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.editor-notice-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
 .editor-notice .text-button {
   min-height: 32px;
-  margin-left: auto;
   white-space: nowrap;
+}
+#copy-card-link {
+  width: 32px;
 }
 .editor-notice.has-changes {
   color: var(--warning);
@@ -1694,6 +1707,47 @@ details[open] > summary {
   margin: auto;
   padding-top: 42px;
 }
+.redirect-page .public-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100dvh;
+  padding: 24px 0;
+  text-align: center;
+}
+.redirect-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+.redirect-spinner {
+  width: 32px;
+  height: 32px;
+  margin-bottom: 14px;
+  border: 3px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: redirect-spin 700ms linear infinite;
+}
+.redirect-status p {
+  color: var(--muted);
+}
+.redirect-link {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+@keyframes redirect-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .redirect-spinner {
+    animation: none;
+  }
+}
 .published-card h1 {
   margin-bottom: 15px;
 }
@@ -1717,11 +1771,6 @@ details[open] > summary {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 24px;
-}
-.destination {
-  display: inline-block;
-  margin-top: 20px;
-  font-size: max(var(--text-min), 0.75rem);
 }
 .public-note {
   margin-top: 36px;
@@ -2664,6 +2713,7 @@ label.check-field {
   height: 28px;
 }
 .saved-delete .icon,
+.saved-copy .icon,
 .saved-external {
   width: 13px;
   height: 13px;
