@@ -4,11 +4,13 @@ make a custom discord-styled site or discord embed with **real buttons**, images
 
 [try it](https://linkbed.me)
 
-<img width="3240" height="2176" alt="CleanShot 2026-11-17 at 3 20 36 PM@2x" src="https://github.com/user-attachments/assets/bbee4ef8-e69a-4392-a205-be6f3a767230" />
+<a href="https://linkbed.me">
+<img width="3046" height="1912" alt="CleanShot 2026-11-17 at 5 44 54 PM@2x" src="https://github.com/user-attachments/assets/550c4505-6126-4eb4-877d-0c372460f857" />
+</a>
 
-<img width="3240" height="2176" alt="CleanShot 2026-11-17 at 3 21 58 PM@2x" src="https://github.com/user-attachments/assets/5a9f331d-3996-4062-aeca-1e5837f140ff" />
-
-<img width="1196" height="772" alt="CleanShot 2026-11-17 at 3 22 59 PM@2x" src="https://github.com/user-attachments/assets/cae6cb9e-7d3c-4911-88c5-a34a2ebe07d5" />
+<a href="https://linkbed.me/schmayterling">
+<img width="3046" height="1912" alt="CleanShot 2026-11-17 at 5 45 40 PM@2x" src="https://github.com/user-attachments/assets/f821e171-200f-4e81-ab4d-97a95b1642f4" />
+</a>
 
 
 ## running locally
