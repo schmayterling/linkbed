@@ -90,7 +90,8 @@ test('homepage follows the saved linkbed card without rebuilding and survives a 
     const response = await fetch(base);
     const html = await response.text();
     assert.equal(response.headers.get('set-cookie'), null);
-    assert.equal(response.headers.get('cache-control'), 'no-cache');
+    assert.equal(response.headers.get('cache-control'), 'private, no-store');
+    assert.equal(response.headers.get('vary'), 'Cookie');
     assert.deepEqual(payload(html), JSON.parse(embedJson(value)));
     inspect
       .prepare('INSERT INTO cards (slug, owner, card, revision, updated_at) VALUES (?, ?, ?, 1, ?)')
@@ -774,5 +775,66 @@ test('auth throttling persists and legacy local cards migrate on account creatio
     await new Promise((resolve) => server.close(resolve));
     await close();
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('initial card data is private, escaped, and uses the current owner session', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lembed-initial-'));
+  const { server, close } = createApp({ dbPath: join(dir, 'cards.sqlite'), databaseUrl: '' });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const base = 'http://127.0.0.1:' + server.address().port;
+  const request = (path, method = 'GET', body, cookie = '') =>
+    fetch(base + path, {
+      method,
+      headers: { origin: 'http://localhost:3000', 'content-type': 'application/json', cookie },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  const initial = (html) =>
+    JSON.parse(
+      html.split('<script id="initial-cards" type="application/json">')[1].split('</script>')[0],
+    );
+  try {
+    const owner = sessionCookie(await request('/api/signup', 'POST', {}));
+    const other = sessionCookie(await request('/api/signup', 'POST', {}));
+    const title = 'private </script><img src=x onerror=alert(1)>';
+    const create = await request(
+      '/api/cards',
+      'POST',
+      {
+        title,
+        slug: 'private-boot',
+        url: null,
+        component: { type: 17, components: [{ type: 10, content: 'private boot content' }] },
+      },
+      owner,
+    );
+    assert.equal(create.status, 201);
+    const response = await request('/', 'GET', undefined, owner);
+    assert.equal(response.headers.get('cache-control'), 'private, no-store');
+    assert.equal(response.headers.get('vary'), 'Cookie');
+    const html = await response.text();
+    const snapshot = initial(html);
+    assert.equal(snapshot.authenticated, true);
+    assert.equal(snapshot.cards[0].title, title);
+    assert.deepEqual(
+      snapshot.cards,
+      await (await request('/api/cards', 'GET', undefined, owner)).json(),
+    );
+    assert.ok(!html.includes(title), 'script content must be escaped');
+    assert.equal('owner' in snapshot.cards[0], false);
+    for (const cookie of ['', other]) {
+      const data = initial(await (await request('/', 'GET', undefined, cookie)).text());
+      assert.deepEqual(data.cards, []);
+    }
+    await request('/api/logout', 'POST', {}, owner);
+    const revoked = initial(await (await request('/', 'GET', undefined, owner)).text());
+    assert.equal(revoked.authenticated, false);
+    assert.deepEqual(revoked.cards, []);
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+    await close();
+    rmSync(dir, { recursive: true, force: true });
   }
 });

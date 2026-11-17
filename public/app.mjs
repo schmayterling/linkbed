@@ -831,11 +831,11 @@ async function deleteCard(slug, errorNode) {
   }
 }
 
-async function refreshCards() {
+async function refreshCards(initial) {
   const version = ++refreshVersion;
   try {
-    const session = await api('/api/session');
-    const cards = await api('/api/cards');
+    const session = initial || (await api('/api/session'));
+    const cards = initial?.cards || (await api('/api/cards'));
     if (version !== refreshVersion) return;
     authenticated = session.authenticated;
     if (editing) {
@@ -2069,4 +2069,4 @@ syncHeaderVisibility();
 saveEditor();
 syncAccount();
 document.body.dataset.ready = '';
-refreshCards();
+refreshCards(JSON.parse($('#initial-cards')?.textContent || 'null'));

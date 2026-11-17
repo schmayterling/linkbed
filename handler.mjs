@@ -86,6 +86,9 @@ async function body(req, max = 16384) {
   return value;
 }
 
+const activeSessionSql =
+  'EXISTS (SELECT 1 FROM sessions s LEFT JOIN accounts a ON a.token_hash = s.owner WHERE s.hash = ? AND s.owner = ? AND s.expires_at > ? AND a.revoked_at IS NULL AND NOT EXISTS (SELECT 1 FROM owner_fingerprints o JOIN creator_fingerprints f ON f.fingerprint = o.fingerprint WHERE o.owner = s.owner AND f.banned_at IS NOT NULL))';
+
 export function createHandler(options = {}) {
   const deploymentHost =
     process.env.VERCEL_ENV === 'production'
@@ -207,6 +210,29 @@ export function createHandler(options = {}) {
     guest: !!current && !current.authenticated,
   });
 
+  async function listCards(db, current) {
+    if (!current) return [];
+    const result = await db.execute({
+      sql:
+        'SELECT slug, card, revision, updated_at, verified_at, sponsored_at, custom_badges FROM cards WHERE owner = ? AND ' +
+        activeSessionSql +
+        ' ORDER BY updated_at DESC',
+      args: [current.owner, current.hash, current.owner, Date.now()],
+    });
+    return result.rows.map((row) => ({
+      slug: row.slug,
+      ...JSON.parse(row.card),
+      revision: row.revision,
+      updatedAt: row.updated_at,
+      sponsored: row.sponsored_at != null,
+      badges: pageBadges({
+        verifiedAt: row.verified_at,
+        sponsoredAt: row.sponsored_at,
+        customBadges: readCustomBadges(row.custom_badges),
+      }),
+    }));
+  }
+
   async function rate(db, req, kind, max) {
     const ip = clientAddress(req);
     const now = Date.now();
@@ -271,7 +297,7 @@ export function createHandler(options = {}) {
         throw fail(404, 'page not found.');
 
       if (path === '/' && ['GET', 'HEAD'].includes(req.method)) {
-        let card, starter;
+        let card, starter, initial;
         try {
           const db = await connect();
           const result = await db.execute(
@@ -281,13 +307,16 @@ export function createHandler(options = {}) {
             if (row.slug === 'linkbed') card = JSON.parse(row.card);
             else starter = JSON.parse(row.card);
           }
+          const current = await session(db, req);
+          initial = { ...sessionInfo(current), cards: await listCards(db, current) };
         } catch (error) {
           console.error('homepage embed unavailable:', error.code || error.name);
         }
-        const html = renderEditor(card, canonical + '/', starter);
+        const html = renderEditor(card, canonical + '/', starter, initial);
         res.writeHead(200, {
           'content-type': 'text/html; charset=utf-8',
-          'cache-control': 'no-cache',
+          'cache-control': 'private, no-store',
+          vary: 'Cookie',
         });
         return res.end(req.method === 'HEAD' ? undefined : html);
       }
@@ -640,34 +669,10 @@ export function createHandler(options = {}) {
         const { owner } = current;
         if (write) await linkOwner(db, owner, visitor);
         const guard = visitor ? fingerprintGuard(visitor) : { sql: '1', args: [] };
-        const activeSession =
-          'EXISTS (SELECT 1 FROM sessions s LEFT JOIN accounts a ON a.token_hash = s.owner WHERE s.hash = ? AND s.owner = ? AND s.expires_at > ? AND a.revoked_at IS NULL AND NOT EXISTS (SELECT 1 FROM owner_fingerprints o JOIN creator_fingerprints f ON f.fingerprint = o.fingerprint WHERE o.owner = s.owner AND f.banned_at IS NOT NULL)) AND ' +
-          guard.sql;
+        const activeSession = activeSessionSql + ' AND ' + guard.sql;
         const access = () => [current.hash, owner, Date.now(), ...guard.args];
         if (path === '/api/cards' && req.method === 'GET') {
-          const result = await db.execute({
-            sql:
-              'SELECT slug, card, revision, updated_at, verified_at, sponsored_at, custom_badges FROM cards WHERE owner = ? AND ' +
-              activeSession +
-              ' ORDER BY updated_at DESC',
-            args: [owner, ...access()],
-          });
-          return json(
-            res,
-            200,
-            result.rows.map((row) => ({
-              slug: row.slug,
-              ...JSON.parse(row.card),
-              revision: row.revision,
-              updatedAt: row.updated_at,
-              sponsored: row.sponsored_at != null,
-              badges: pageBadges({
-                verifiedAt: row.verified_at,
-                sponsoredAt: row.sponsored_at,
-                customBadges: readCustomBadges(row.custom_badges),
-              }),
-            })),
-          );
+          return json(res, 200, await listCards(db, current));
         }
         const api = path.match(/^\/api\/cards\/([a-z0-9-]+)$/);
         if (api && req.method === 'GET') {

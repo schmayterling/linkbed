@@ -21,7 +21,7 @@ function previewColor(card) {
   return color == null ? null : '#' + color.toString(16).padStart(6, '0');
 }
 
-export function renderEditor(card, url, starter) {
+export function renderEditor(card, url, starter, initial) {
   const e = escapeHtml;
   const { title, description, image } = card
     ? seoMetadata(card)
@@ -44,6 +44,7 @@ ${image ? `<meta name="twitter:image" content="${e(image)}">` : ''}
 <link rel="canonical" href="${e(url)}">
 ${color ? `<meta name="theme-color" content="${e(color)}">` : ''}
 ${card ? embedScript(card) : ''}
+${initial ? `<script id="initial-cards" type="application/json">${JSON.stringify(initial).replace(/</g, '\\u003c')}</script>` : ''}
 ${starter ? `<script id="starter-card" type="application/json">${JSON.stringify(starter).replace(/</g, '\\u003c')}</script>` : ''}`;
   return readFileSync(fileURLToPath(new URL('./editor.html', import.meta.url)), 'utf8')
     .replace('<!-- card metadata -->', () => metadata)
