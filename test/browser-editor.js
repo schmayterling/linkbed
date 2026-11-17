@@ -31,6 +31,8 @@
   const originalAcceptance = localStorage.getItem('linkbed-terms-accepted');
   let failRead = false;
   let failWrite = false;
+  let signedIn = true;
+  let signups = 0;
   let writes = 0;
   let copied = null;
   const clipboard = navigator.clipboard;
@@ -57,7 +59,13 @@
       .pathname;
     if (!path.startsWith('/api/')) return originalFetch(request, options);
     const method = options.method || 'GET';
-    if (path === '/api/session') return Response.json({ authenticated: true });
+    if (path === '/api/session')
+      return Response.json({ authenticated: signedIn, guest: !signedIn });
+    if (path === '/api/signup' && method === 'POST') {
+      signups++;
+      signedIn = true;
+      return Response.json({ token: 'test-access-token' });
+    }
     if (path === '/api/cards' && method === 'GET') return Response.json([card]);
     if (path === '/api/cards/editor-check' && method === 'GET')
       return failRead
@@ -93,7 +101,7 @@
     check(!$('#title').value, 'bottom clear uses the same empty reset');
 
     $('#show-cards').click();
-    await wait(() => $('.saved-preview'));
+    await wait(() => $('.saved-url')?.href === location.origin + '/editor-check');
     const publicUrl = $('.saved-url').href;
     $('.saved-copy').click();
     await wait(() => copied === publicUrl);
@@ -151,6 +159,7 @@
       $('#publish-dialog').open && $('#publish-form').hidden,
       'publish stays open at the copy prompt',
     );
+    check($('#publish-token-prompt').hidden, 'signed-in publishers do not see token prompt');
     copied = null;
     $('#copy-published-link').click();
     await wait(() => copied === publicUrl && $('#copy-published-label').textContent === 'copied!');
@@ -188,6 +197,24 @@
     );
     $('#publish-dialog [data-close]').click();
     await wait(() => !$('#publish-dialog').open);
+
+    failWrite = false;
+    signedIn = false;
+    $('#publish-button').click();
+    $('#confirm-publish').click();
+    await wait(() => !$('#publish-result').hidden && !$('#card-form').inert);
+    check(!$('#publish-token-prompt').hidden, 'guest publishers see token prompt');
+    check(signups === 0, 'publishing never creates an access token automatically');
+    $('#publish-token-prompt .create-token').click();
+    await wait(() => $('#account-new-token').open && !$('#card-form').inert);
+    check(
+      signups === 1 && !$('#publish-dialog').open,
+      'token action uses signup and closes publish',
+    );
+    check($('#publish-token-prompt').hidden, 'creating a token clears guest prompt');
+    $('#finish-account').click();
+    await wait(() => !$('#account-new-token').open && !$('#new-token').textContent);
+    check(!$('#new-token').textContent, 'closing token dialog clears the displayed token');
     return { passed };
   } finally {
     window.fetch = originalFetch;

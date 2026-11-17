@@ -796,6 +796,7 @@ async function api(path, options = {}) {
 
 function syncAccount() {
   $('#guest-notice').hidden = authenticated;
+  $('#publish-token-prompt').hidden = authenticated;
   if (newToken && !$('#account-new-token').open) $('#account-new-token').showModal();
   $('#sign-out').hidden = !authenticated || !!newToken;
   $('#saved-cards').hidden = false;
@@ -1772,6 +1773,7 @@ document.querySelectorAll('.create-token').forEach((button) =>
   button.addEventListener('click', async () => {
     if (busy) return;
     resumeEditor = document.body.dataset.view === 'editor';
+    publishDialog.close();
     showView('cards');
     const result = await accountRequest('/api/signup');
     if (result) {

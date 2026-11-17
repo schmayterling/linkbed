@@ -1959,13 +1959,17 @@ details[open] > summary {
 .page-appearance > label {
   margin-top: 14px;
 }
-.page-link-warning {
+.page-link-warning,
+.token-prompt {
   padding: 10px 12px;
   border: 1px solid color-mix(in oklab, var(--warning) 40%, var(--line));
   border-radius: 6px;
   background: color-mix(in oklab, var(--warning) 5%, var(--bg));
   color: var(--warning);
   margin: 12px 0 0;
+}
+.token-prompt .create-token {
+  margin-top: 12px;
 }
 .page-management > .hint {
   margin-bottom: 0;
