@@ -169,8 +169,14 @@
         </div>
         <div class="maker-layout">
           <form id="card-form" aria-labelledby="edit-tab" novalidate>
-            <aside id="editor-notice" class="editor-notice" role="status" aria-live="polite" hidden>
-              <p id="editor-notice-text"></p>
+            <aside
+              id="editor-notice"
+              class="editor-notice has-changes"
+              role="status"
+              aria-live="polite"
+            >
+              <p id="editor-notice-text">start with this template, or clear it to make your own.</p>
+              <button id="clear-template" class="text-button" type="button">clear template</button>
             </aside>
             <section
               id="editor-errors"

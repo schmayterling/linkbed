@@ -53,7 +53,8 @@ const composer = createComposer($('#component-list'), () => {
 let editing = null,
   dirty = false,
   slugEdited = false,
-  showErrors = false;
+  showErrors = false,
+  usingTemplate = true;
 let restoring = true;
 let authenticated = false,
   newToken = '',
@@ -270,23 +271,22 @@ function saveEditor() {
         scroll: scrollY,
         embedMode: $('#embed-mode').value,
         showErrors,
-        draft:
-          editing || dirty
-            ? {
-                card: {
-                  ...draft(),
-                  title: fields.title.value,
-                  description: fields.description.value,
-                  url: fields.url.value,
-                },
-                slug: fields.slug.value,
-                color: fields.color.value,
-                editing,
-                dirty,
-                slugEdited,
-                json: jsonDirty ? $('#component-json').value : null,
-              }
-            : null,
+        draft: !usingTemplate
+          ? {
+              card: {
+                ...draft(),
+                title: fields.title.value,
+                description: fields.description.value,
+                url: fields.url.value,
+              },
+              slug: fields.slug.value,
+              color: fields.color.value,
+              editing,
+              dirty,
+              slugEdited,
+              json: jsonDirty ? $('#component-json').value : null,
+            }
+          : null,
       }),
     );
     return true;
@@ -311,6 +311,7 @@ function restoreEditor() {
         (saved.editing !== null && typeof saved.editing !== 'string')
       )
         return null;
+      usingTemplate = false;
       fill(saved.card, saved.slug);
       fields.color.value = saved.color;
       editing = saved.editing;
@@ -389,10 +390,13 @@ function update() {
     $('#component-json').value = value;
     jsonEditor?.set(value);
   }
-  $('#editor-notice').hidden = !editing && !dirty;
-  $('#editor-notice').classList.toggle('has-changes', dirty);
+  $('#editor-notice').hidden = !editing && !dirty && !usingTemplate;
+  $('#clear-template').textContent = editing || dirty ? 'clear changes' : 'clear template';
+  $('#clear-template').disabled = busy;
+  $('#editor-notice').classList.toggle('has-changes', dirty || usingTemplate);
   const notice = $('#editor-notice-text');
   notice.replaceChildren();
+  if (usingTemplate) notice.textContent = 'start with this template, or clear it to make your own.';
   if (dirty)
     notice.append(
       document.createTextNode(
@@ -466,6 +470,7 @@ function validateEditor(card = draft()) {
 }
 
 function changed() {
+  usingTemplate = false;
   dirty = true;
   showErrors = true;
   $('#form-status').textContent = '';
@@ -514,6 +519,7 @@ function syncAccount() {
 async function openCard(card) {
   if (busy || (dirty && !(await confirmAction('discard unsaved changes?', 'discard')))) return;
   editing = card.slug;
+  usingTemplate = false;
   slugEdited = true;
   dirty = false;
   fill(card, card.slug);
@@ -600,6 +606,7 @@ async function reset(ask = true) {
   if (ask && (busy || (dirty && !(await confirmAction('discard unsaved changes?', 'discard')))))
     return false;
   editing = null;
+  usingTemplate = true;
   dirty = false;
   slugEdited = false;
   $('#form-status').textContent = '';
@@ -708,13 +715,37 @@ document
       } else newCard();
     });
   });
-$('#reset').addEventListener('click', () => reset());
+async function clearChanges() {
+  if (busy || (dirty && !(await confirmAction('discard unsaved changes?', 'discard')))) return;
+  setBusy(true);
+  try {
+    const card = editing
+      ? await api('/api/cards/' + editing)
+      : {
+          url: null,
+          title: '',
+          description: '',
+          component: { type: 17, accent_color: null, components: [] },
+        };
+    usingTemplate = false;
+    dirty = false;
+    slugEdited = !!editing;
+    $('#form-status').textContent = '';
+    fill(card, editing || '');
+  } catch (error) {
+    $('#form-status').textContent = error.message;
+  } finally {
+    setBusy(false);
+  }
+}
+$('#reset').addEventListener('click', clearChanges);
+$('#clear-template').addEventListener('click', clearChanges);
 $('#delete-card').addEventListener('click', () => {
   if (editing) deleteCard(editing, $('#form-status'));
 });
 for (const type of ['focusin', 'click', 'input', 'change'])
-  $('#card-form').addEventListener(type, () => {
-    if (loading || showErrors) return;
+  $('#card-form').addEventListener(type, (event) => {
+    if (loading || showErrors || event.target.closest('#clear-template, #reset')) return;
     showErrors = true;
     update();
   });
@@ -1007,6 +1038,7 @@ const publishDialog = $('#publish-dialog'),
   publishForm = $('#publish-form'),
   publishConfirm = $('#publish-confirm'),
   confirmPublish = $('#confirm-publish');
+let termsAccepted = false;
 $('#card-form').addEventListener('submit', (event) => {
   event.preventDefault();
   if (busy || jsonDirty || publishDialog.open) return;
@@ -1016,8 +1048,14 @@ $('#card-form').addEventListener('submit', (event) => {
     setTab('edit');
     return;
   }
+  try {
+    termsAccepted ||= localStorage.getItem('linkbed-terms-accepted') === 'true';
+  } catch {}
   publishForm.reset();
-  confirmPublish.disabled = true;
+  publishConfirm.closest('label').hidden = termsAccepted;
+  publishConfirm.required = !termsAccepted;
+  publishConfirm.autofocus = !termsAccepted;
+  confirmPublish.disabled = !termsAccepted;
   $('#publish-error').textContent = '';
   $('#publish-heading').textContent = editing ? 'save changes?' : 'publish card?';
   confirmPublish.textContent = editing ? 'save changes' : 'publish card';
@@ -1030,9 +1068,10 @@ $('#card-form').addEventListener('submit', (event) => {
     : '';
   closeMenus();
   publishDialog.showModal();
+  if (termsAccepted) confirmPublish.focus();
 });
 publishConfirm.addEventListener('change', () => {
-  confirmPublish.disabled = busy || !publishConfirm.checked;
+  confirmPublish.disabled = busy || (!termsAccepted && !publishConfirm.checked);
   $('#publish-error').textContent = '';
 });
 publishDialog.addEventListener('close', () => {
@@ -1042,12 +1081,16 @@ publishDialog.addEventListener('close', () => {
 });
 publishForm.addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (busy || !publishDialog.open || !publishConfirm.checked) return;
+  if (busy || !publishDialog.open || (!termsAccepted && !publishConfirm.checked)) return;
   if (validateEditor().length) {
     publishDialog.close();
     setTab('edit');
     return;
   }
+  termsAccepted = true;
+  try {
+    localStorage.setItem('linkbed-terms-accepted', 'true');
+  } catch {}
   let saved = false;
   try {
     const card = normalizeCard(draft(), cardUrl(fields.slug.value));
@@ -1066,6 +1109,7 @@ publishForm.addEventListener('submit', async (event) => {
       });
     });
     editing = published.slug;
+    usingTemplate = false;
     dirty = false;
     slugEdited = true;
     await refreshCards();

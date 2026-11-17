@@ -1608,6 +1608,7 @@ details[open] > summary {
 }
 .editor-notice {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
@@ -1617,15 +1618,22 @@ details[open] > summary {
   font-size: max(var(--text-min), 0.8125rem);
 }
 .editor-notice p {
+  flex: 1 1 200px;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+.editor-notice .text-button {
+  min-height: 32px;
+  margin-left: auto;
+  white-space: nowrap;
 }
 .editor-notice.has-changes {
   color: var(--warning);
   border-color: color-mix(in oklab, var(--warning) 40%, var(--line));
   background: color-mix(in oklab, oklch(0.86 0.14 90) 8%, var(--bg));
 }
-.editor-notice.has-changes a {
+.editor-notice.has-changes a,
+.editor-notice.has-changes .text-button {
   color: inherit;
   text-decoration: underline;
 }

@@ -247,17 +247,22 @@
   const publishDialog = document.querySelector('#publish-dialog');
   const publishConfirm = document.querySelector('#publish-confirm');
   const confirmPublish = document.querySelector('#confirm-publish');
+  const termsAccepted = localStorage.getItem('linkbed-terms-accepted') === 'true';
   document.querySelector('#publish-button').click();
   check(
-    publishDialog.open && !publishConfirm.checked && confirmPublish.disabled,
-    'publish requires explicit unchecked confirmation',
+    publishDialog.open &&
+      !publishConfirm.checked &&
+      confirmPublish.disabled === !termsAccepted &&
+      publishConfirm.closest('label').hidden === termsAccepted,
+    'publish requests agreement only when needed',
   );
-  document
-    .querySelector('#publish-form')
-    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  if (!termsAccepted)
+    document
+      .querySelector('#publish-form')
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
   check(
     publishDialog.open && !document.querySelector('#card-form').inert,
-    'unchecked publish does not start saving',
+    'opening or rejecting unchecked publish does not start saving',
   );
   publishConfirm.click();
   check(!confirmPublish.disabled, 'checking acknowledgement enables final publish');
