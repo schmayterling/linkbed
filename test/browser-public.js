@@ -39,6 +39,32 @@
   try {
     $('#report-abuse').click();
     check($('#report-dialog').open && location.href === url, 'report opens without navigating');
+    const appearance = JSON.parse($('#page-appearance')?.textContent || '{}');
+    const scheme = appearance.colorScheme || document.documentElement.dataset.theme;
+    const palette = appearance.colors?.[scheme] || {};
+    check(
+      getComputedStyle($('#report-dialog')).colorScheme === scheme,
+      'report uses page color scheme',
+    );
+    if (palette.card) {
+      const background = getComputedStyle($('#public-card')).backgroundColor;
+      for (const selector of [
+        '#report-dialog',
+        '#report-dialog .card-titlebar',
+        '#report-url',
+        '#report-reason',
+      ])
+        check(
+          getComputedStyle($(selector)).backgroundColor === background,
+          selector + ' uses page surface',
+        );
+    }
+    if (palette.button && $('.preview-button')) {
+      const button = getComputedStyle($('.preview-button'));
+      const submit = getComputedStyle($('#send-report'));
+      check(submit.backgroundColor === button.backgroundColor, 'report uses page button color');
+      check(submit.color === button.color, 'report uses page button text color');
+    }
     check(
       !$('#report-confirm').checked && $('#report-url').readOnly,
       'report starts unchecked with fixed card',

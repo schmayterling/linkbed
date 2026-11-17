@@ -68,6 +68,15 @@ components.slice(1).forEach((component, index) => {
 const reportButton = document.querySelector('#report-abuse');
 if (reportButton) {
   const dialog = document.querySelector('#report-dialog');
+  dialog.style.colorScheme = scheme;
+  for (const [name, value] of Object.entries({
+    '--bg': colors.card,
+    '--surface': colors.card,
+    '--editor-surface': colors.card,
+    '--accent': colors.button,
+    '--accent-ink': colors.button_text,
+  }))
+    if (value) dialog.style.setProperty(name, value);
   const form = document.querySelector('#report-form');
   const reportUrl = document.querySelector('#report-url');
   const confirmation = document.querySelector('#report-confirm');

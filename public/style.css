@@ -205,6 +205,7 @@ h3 {
   font-size: max(var(--text-min), 0.75rem);
 }
 .nav-link.text-button {
+  padding-inline: 4px;
   color: var(--muted);
 }
 .nav-link {
@@ -213,9 +214,6 @@ h3 {
 .nav-link:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--accent);
-}
-#report-abuse {
-  padding-inline: 4px;
 }
 .nav-link:hover,
 .nav-link[aria-current='page'] {
@@ -257,6 +255,7 @@ h3 {
 .site-header nav[popover] button {
   justify-content: flex-start;
   width: 100%;
+  height: auto;
   min-height: 40px;
   padding: 9px 10px;
   border-radius: 4px;
