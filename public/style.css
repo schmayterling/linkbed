@@ -1730,15 +1730,6 @@ details[open] > summary {
   font-size: max(var(--text-min), 0.75rem);
   z-index: 2;
 }
-.public-header {
-  width: min(calc(100% - 40px), 512px);
-  margin: auto;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  height: 80px;
-  gap: 20px;
-}
 .public-content {
   width: min(calc(100% - 40px), 512px);
   margin: auto;

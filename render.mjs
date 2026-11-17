@@ -153,8 +153,7 @@ ${
 <p role="status">redirecting to</p>
 <a class="redirect-link" data-redirect href="${e(card.url)}" rel="noopener noreferrer">${e(card.url)}</a>
 </div></main>`
-    : `<header class="public-header"><a class="brand" href="/">linkbed</a><a class="text-link" href="/">make your own card ↗</a></header>
-<main class="public-content">
+    : `<main class="public-content">
 ${headerBadges ? `<div class="page-badges" aria-label="page badges">${headerBadges}</div>` : ''}
 <div class="discord-window public-card-preview"><article id="public-card" class="discord-card" aria-label="${e(card.title)}"></article></div>
 <noscript><article class="published-card">
