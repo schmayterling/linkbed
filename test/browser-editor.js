@@ -67,6 +67,11 @@
       return Response.json({ token: 'test-access-token' });
     }
     if (path === '/api/cards' && method === 'GET') return Response.json([card]);
+    if (path === '/api/cards' && method === 'POST') {
+      writes++;
+      card = JSON.parse(options.body);
+      return Response.json(card);
+    }
     if (path === '/api/cards/editor-check' && method === 'GET')
       return failRead
         ? Response.json({ error: 'saved card unavailable' }, { status: 503 })
@@ -144,6 +149,7 @@
         $('#confirm-publish').disabled,
       'first publish requires agreement',
     );
+    check(!$('#publish-update-notice').hidden, 'edit confirmation shows Discord update notice');
     $('#publish-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     check(writes === 0, 'unchecked agreement blocks publishing');
     $('#publish-confirm').click();
@@ -160,6 +166,7 @@
       'publish stays open at the copy prompt',
     );
     check($('#publish-token-prompt').hidden, 'signed-in publishers do not see token prompt');
+    check(!$('#publish-update-notice').hidden, 'successful edit keeps Discord update notice');
     copied = null;
     $('#copy-published-link').click();
     await wait(() => copied === publicUrl && $('#copy-published-label').textContent === 'copied!');
@@ -204,6 +211,7 @@
     $('#confirm-publish').click();
     await wait(() => !$('#publish-result').hidden && !$('#card-form').inert);
     check(!$('#publish-token-prompt').hidden, 'guest publishers see token prompt');
+    check(!$('#publish-update-notice').hidden, 'guest edits also show Discord update notice');
     check(signups === 0, 'publishing never creates an access token automatically');
     $('#publish-token-prompt .create-token').click();
     await wait(() => $('#account-new-token').open && !$('#card-form').inert);
@@ -215,6 +223,15 @@
     $('#finish-account').click();
     await wait(() => !$('#account-new-token').open && !$('#new-token').textContent);
     check(!$('#new-token').textContent, 'closing token dialog clears the displayed token');
+
+    $('#make-card').click();
+    await wait(() => $('#clear-template').textContent === 'clear template');
+    $('#publish-button').click();
+    check($('#publish-update-notice').hidden, 'new card confirmation hides Discord update notice');
+    $('#confirm-publish').click();
+    await wait(() => !$('#publish-result').hidden && !$('#card-form').inert);
+    check($('#publish-update-notice').hidden, 'new card success hides Discord update notice');
+    $('#publish-result [data-close]').click();
     return { passed };
   } finally {
     window.fetch = originalFetch;

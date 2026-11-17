@@ -1631,6 +1631,7 @@ $('#card-form').addEventListener('submit', (event) => {
   $('#publish-url').href = cardUrl(fields.slug.value);
   const renamed = editing && fields.slug.value !== editing;
   $('#publish-rename-warning').hidden = !renamed;
+  $('#publish-update-notice').hidden = !editing;
   $('#publish-rename-warning').textContent = renamed
     ? 'this changes /' + editing + ' to /' + fields.slug.value + '. the old link will stop working.'
     : '';

@@ -1967,7 +1967,7 @@ details[open] > summary {
   margin-top: 14px;
 }
 .page-link-warning,
-.token-prompt {
+.publish-notice {
   padding: 10px 12px;
   border: 1px solid color-mix(in oklab, var(--warning) 40%, var(--line));
   border-radius: 6px;
@@ -1975,7 +1975,7 @@ details[open] > summary {
   color: var(--warning);
   margin: 12px 0 0;
 }
-.token-prompt .create-token {
+.publish-notice .create-token {
   margin-top: 12px;
 }
 .page-management > .hint {
