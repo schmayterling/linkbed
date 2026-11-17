@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { importCardJson, messageJson } from '../public/interchange.mjs';
+import { MAX_CARDS } from '../public/model.mjs';
 
 const component = {
   type: 17,
@@ -60,11 +61,19 @@ test('multicard native and Discord message roots round-trip without flattening c
   }
   assert.deepEqual(importCardJson({ component, additional_cards: [] }), { component });
   assert.equal(
-    JSON.parse(messageJson({ component, additional_cards: Array(6).fill(extra) })).components
-      .length,
+    JSON.parse(messageJson({ component, additional_cards: Array(MAX_CARDS - 1).fill(extra) }))
+      .components.length,
     1,
   );
-  assert.throws(() => importCardJson({ component, additional_cards: Array(7).fill(extra) }));
+  for (const data of [
+    { component, additional_cards: Array(MAX_CARDS - 1).fill(extra) },
+    { components: [component, ...Array(MAX_CARDS - 1).fill(extra)] },
+  ]) {
+    assert.equal(importCardJson(data).additional_cards.length, MAX_CARDS - 1);
+  }
+  assert.throws(() =>
+    importCardJson({ component, additional_cards: Array(MAX_CARDS).fill(extra) }),
+  );
   assert.throws(() =>
     importCardJson({
       component,
@@ -146,7 +155,7 @@ test('unsupported or oversized imports fail before replacing a draft', () => {
     { components: [component], embeds: [{}] },
     { component, additional_cards: null },
     { component, additional_cards: [{ type: 10, content: 'not a root' }] },
-    { components: Array(11).fill(component) },
+    { components: Array(MAX_CARDS + 1).fill(component) },
     { embeds: [{ title: 'one' }, { title: 'two' }] },
     { content: 'hi', attachments: [{ id: '123' }] },
     { content: 'hi', components: [{ type: 3 }] },

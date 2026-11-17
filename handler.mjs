@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { openDatabase } from './database.mjs';
 import {
   normalizeCard,
+  MAX_PAGE_BYTES,
   normalizeCustomBadges,
   pageBadges,
   normalizeSlug,
@@ -703,7 +704,7 @@ export function createHandler(options = {}) {
         }
         const create = path === '/api/cards' && req.method === 'POST';
         if (!create && !(api && req.method === 'PUT')) throw fail(405, 'method not allowed.');
-        const input = await body(req, 65536);
+        const input = await body(req, MAX_PAGE_BYTES);
         const slug = normalizeSlug(input.slug ?? api?.[1]);
         const forbidden = await db.execute({
           sql: 'SELECT slug FROM banned_slugs WHERE slug = ? OR slug = ?',

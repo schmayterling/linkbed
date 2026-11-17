@@ -1,5 +1,6 @@
 export const MAX_BYTES = 3000;
-export const MAX_CARDS = 7;
+export const MAX_CARDS = 27;
+export const MAX_PAGE_BYTES = 256 * 1024;
 export const MAX_BADGES = 40;
 export const MAX_CUSTOM_BADGES = 20;
 export const REPORT_REASONS = [

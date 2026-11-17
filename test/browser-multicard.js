@@ -1,5 +1,6 @@
 // Run in a fresh editor tab. All card API writes are mocked.
 (async () => {
+  const { MAX_CARDS } = await import('/model.mjs');
   const $ = (selector) => document.querySelector(selector);
   const wait = async (test) => {
     for (let i = 0; i < 100 && !test(); i++)
@@ -175,31 +176,31 @@
     await close('#confirm-action');
     await wait(() => count() === 1 && !$('#source-url').disabled);
     check(count() === 1 && !$('#source-url').disabled, 'one card enables destination again');
-    for (let i = 1; i < 7; i++) {
+    for (let i = 1; i < MAX_CARDS; i++) {
       $('#add-page-card').click();
       await wait(() => count() === i + 1);
     }
     check(
-      count() === 7 &&
+      count() === MAX_CARDS &&
         $('#add-page-card').disabled &&
         active().querySelector('[data-action="copy"]').disabled,
-      'seven-card limit',
+      '27-card limit',
     );
     $('#add-page-card').click();
-    check(count() === 7, 'cap cannot be bypassed by click');
+    check(count() === MAX_CARDS, 'cap cannot be bypassed by click');
     input('#component-list textarea', 'x'.repeat(3100));
     select(0);
     check(
-      $('#validation-list').textContent.includes('card 7'),
+      $('#validation-list').textContent.includes('card ' + MAX_CARDS),
       'invalid inactive card is identified',
     );
     $('#publish-button').click();
     check(!$('#publish-dialog').open, 'inactive invalid card blocks publishing');
-    select(6);
+    select(MAX_CARDS - 1);
     input('#component-list textarea', lastText);
     check($('#validation-list').hidden, 'fixed card clears validation');
     check(
-      JSON.parse($('#component-json').value).additional_cards.length === 6,
+      JSON.parse($('#component-json').value).additional_cards.length === MAX_CARDS - 1,
       'json editor keeps every card',
     );
     check(
@@ -283,7 +284,7 @@
     $('#confirm-publish').click();
     await wait(() => !$('#publish-result').hidden && !$('#card-form').inert);
     check(
-      saved.additional_cards.length === 6 && saved.url === null,
+      saved.additional_cards.length === MAX_CARDS - 1 && saved.url === null,
       'publish saves all cards without redirect',
     );
     await close('#publish-result [data-close]');
@@ -313,11 +314,11 @@
       );
     }
     $('.saved-preview').click();
-    check(count() === 7, 'opening saved page restores all cards');
-    select(6);
+    check(count() === MAX_CARDS, 'opening saved page restores all cards');
+    select(MAX_CARDS - 1);
     check($('#component-list textarea').value === lastText, 'last saved card restores content');
     check(
-      state().activeCard === 6 && state().previewMode === 'page',
+      state().activeCard === MAX_CARDS - 1 && state().previewMode === 'page',
       'active card and preview mode persist for refresh',
     );
     const box = () => {

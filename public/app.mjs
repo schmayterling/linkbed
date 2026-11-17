@@ -22,6 +22,7 @@ import {
   destinationUrl,
   MAX_BYTES,
   MAX_CARDS,
+  MAX_PAGE_BYTES,
   PAGE_COLORS,
   cardComponents,
   seoMetadata,
@@ -440,7 +441,7 @@ function restoreEditor() {
         ) ||
         (saved.card.additional_cards !== undefined &&
           (!Array.isArray(saved.card.additional_cards) ||
-            saved.card.additional_cards.length > 9 ||
+            saved.card.additional_cards.length >= MAX_CARDS ||
             saved.card.additional_cards.some(
               (card) =>
                 !(
@@ -1512,7 +1513,7 @@ $('#import-json').addEventListener('change', async (event) => {
   if (!file || busy) return;
   setBusy(true);
   try {
-    if (file.size > 64000) throw new Error('json file is too large.');
+    if (file.size > MAX_PAGE_BYTES) throw new Error('json file is too large.');
     const value = await file.text();
     importCardJson(value);
     $('#component-json').value = value;

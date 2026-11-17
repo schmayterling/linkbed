@@ -19,7 +19,7 @@ test('extra page cards normalize independently and stay out of the primary embed
   assert.deepEqual(model.cardComponents(normalized), [primary, extra]);
   assert.deepEqual(JSON.parse(model.embedJson(normalized)), { component: primary });
   assert.equal(model.payloadBytes(normalized), model.payloadBytes({ component: primary }));
-  assert.equal(model.MAX_CARDS, 7);
+  assert.equal(model.MAX_CARDS, 27);
   for (const additional_cards of [undefined, []]) {
     assert.equal('additional_cards' in model.normalizeCard({ ...page, additional_cards }), false);
   }
@@ -34,7 +34,7 @@ test('extra page cards normalize independently and stay out of the primary embed
   ]);
 });
 
-test('seven page cards are allowed with byte, component and media caps on each root', () => {
+test('27 page cards are allowed with byte, component and media caps on each root', () => {
   const full = root(
     {
       type: 12,
@@ -47,17 +47,21 @@ test('seven page cards are allowed with byte, component and media caps on each r
   const normalized = model.normalizeCard({
     ...page,
     component: full,
-    additional_cards: Array(6).fill(full),
+    additional_cards: Array(model.MAX_CARDS - 1).fill(full),
   });
-  assert.equal(model.cardComponents(normalized).length, 7);
+  assert.equal(model.cardComponents(normalized).length, model.MAX_CARDS);
   for (const component of model.cardComponents(normalized)) {
     assert.deepEqual(model.componentStats(component), { components: 40, media: 10 });
   }
   const overhead = model.payloadBytes({ component: root(text('')) });
   const exact = root(text('x'.repeat(model.MAX_BYTES - overhead)));
-  model.normalizeCard({ ...page, component: exact, additional_cards: Array(6).fill(exact) });
+  model.normalizeCard({
+    ...page,
+    component: exact,
+    additional_cards: Array(model.MAX_CARDS - 1).fill(exact),
+  });
   for (const additional_cards of [
-    Array(7).fill(extra),
+    Array(model.MAX_CARDS).fill(extra),
     [root(text(exact.components[0].content + 'x'))],
     [root(...Array.from({ length: 40 }, () => ({ type: 14 })))],
     [
@@ -138,7 +142,7 @@ test('multicard create, update, list and public render preserve extras while Dis
         await request('/api/cards', 'POST', {
           ...page,
           slug: 'too-many',
-          additional_cards: Array(7).fill(extra),
+          additional_cards: Array(model.MAX_CARDS).fill(extra),
         })
       ).status,
       400,
@@ -163,13 +167,28 @@ test('multicard create, update, list and public render preserve extras while Dis
       assert.match((await response.json()).error, /private network/);
     }
     const large = root(text('x'.repeat(2800)));
-    const largePage = { ...page, component: large, additional_cards: Array(6).fill(large) };
-    assert.ok(Buffer.byteLength(JSON.stringify(largePage)) > 16384);
+    const largePage = {
+      ...page,
+      component: large,
+      additional_cards: Array(model.MAX_CARDS - 1).fill(large),
+    };
+    assert.ok(Buffer.byteLength(JSON.stringify(largePage)) > 65536);
     assert.equal((await request('/api/cards/multicard', 'PUT', largePage)).status, 200);
-    assert.equal((await (await request('/api/cards/multicard')).json()).additional_cards.length, 6);
     assert.equal(
-      (await request('/api/cards/multicard', 'PUT', { ...page, padding: 'x'.repeat(65536) }))
-        .status,
+      (await (await request('/api/cards/multicard')).json()).additional_cards.length,
+      model.MAX_CARDS - 1,
+    );
+    assert.equal(
+      script(await (await request('/multicard')).text(), 'page-cards').length,
+      model.MAX_CARDS,
+    );
+    assert.equal(
+      (
+        await request('/api/cards/multicard', 'PUT', {
+          ...page,
+          padding: 'x'.repeat(model.MAX_PAGE_BYTES),
+        })
+      ).status,
       413,
     );
     assert.equal((await request('/api/guest', 'POST', { padding: 'x'.repeat(17000) })).status, 413);
