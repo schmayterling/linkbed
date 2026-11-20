@@ -303,16 +303,16 @@ body[data-view='cards'] main {
   width: 100%;
 }
 @media (min-width: 761px) {
-  .guest-notice {
+  .account-notice {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
     gap: 8px 40px;
     align-items: start;
   }
-  .guest-notice > div:first-child {
+  .account-notice > div:first-child {
     max-width: 70ch;
   }
-  .guest-notice .guest-actions {
+  .account-notice .account-actions {
     align-items: flex-end;
     justify-self: end;
     margin-top: 0;
@@ -802,19 +802,19 @@ body[data-view='admin'] main {
 .color-field > .field-error {
   flex-basis: 100%;
 }
-.guest-notice {
+.account-notice {
   padding: 18px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
 }
-.guest-notice strong {
+.account-notice strong {
   font-weight: 600;
 }
-.guest-notice .hint {
+.account-notice .hint {
   color: var(--muted);
 }
-.guest-actions {
+.account-actions {
   display: flex;
   flex-direction: column;
   align-items: flex-start;

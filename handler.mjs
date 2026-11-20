@@ -290,6 +290,7 @@ export function createHandler(options = {}) {
           '/api/signup',
           '/api/login',
           '/api/logout',
+          '/api/regenerate-token',
           '/api/import',
         ].includes(path) &&
         !path.startsWith('/api/cards') &&
@@ -639,6 +640,55 @@ export function createHandler(options = {}) {
           token ? 201 : 200,
           token ? { authenticated: true, token } : { authenticated: true },
         );
+      }
+      if (req.method === 'POST' && path === '/api/regenerate-token') {
+        await rate(db, req, 'auth', 10);
+        const current = await session(db, req);
+        if (!current?.authenticated) throw fail(401, 'sign in with your access token first.');
+        const token = 'lembed_' + randomBytes(32).toString('base64url');
+        const owner = hash(token);
+        const sessionToken = randomBytes(32).toString('hex');
+        const now = Date.now();
+        const replaced = 'EXISTS (SELECT 1 FROM accounts WHERE token_hash = ?)';
+        // every write after the first only runs if the new account row was created, so a
+        // concurrent regenerate or a revoked token changes nothing.
+        const results = await db.batch(
+          [
+            {
+              sql:
+                'INSERT INTO accounts (token_hash, created_at) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM accounts WHERE token_hash = ? AND revoked_at IS NULL) AND ' +
+                activeSessionSql +
+                ' RETURNING token_hash',
+              args: [owner, now, current.owner, current.hash, current.owner, now],
+            },
+            {
+              sql: 'UPDATE accounts SET revoked_at = ? WHERE token_hash = ? AND ' + replaced,
+              args: [now, current.owner, owner],
+            },
+            {
+              sql: 'UPDATE cards SET owner = ? WHERE owner = ? AND ' + replaced,
+              args: [owner, current.owner, owner],
+            },
+            {
+              sql: 'UPDATE owner_fingerprints SET owner = ? WHERE owner = ? AND ' + replaced,
+              args: [owner, current.owner, owner],
+            },
+            {
+              sql: 'DELETE FROM sessions WHERE owner = ? AND ' + replaced,
+              args: [current.owner, owner],
+            },
+            {
+              sql:
+                'INSERT INTO sessions (hash, owner, expires_at) SELECT ?, ?, ? WHERE ' + replaced,
+              args: [hash(sessionToken), owner, now + 2592000000, owner],
+            },
+          ],
+          'write',
+        );
+        if (!results[0].rows.length)
+          throw fail(409, 'access token already changed. sign in again.');
+        setCookie(res, 'lembed_session', sessionToken);
+        return json(res, 201, { authenticated: true, token });
       }
       if (req.method === 'POST' && path === '/api/logout') {
         const current = await session(db, req);

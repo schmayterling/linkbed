@@ -61,7 +61,7 @@
       <section id="cards-view" aria-labelledby="cards-heading" hidden>
         <h1 id="cards-heading" tabindex="-1">your cards</h1>
         <section id="account-panel" aria-label="access your cards">
-          <aside id="guest-notice" class="guest-notice" aria-label="temporary guest cards">
+          <aside id="guest-notice" class="account-notice" aria-label="temporary guest cards">
             <div>
               <p><strong>save access to your cards.</strong></p>
               <p class="hint">
@@ -78,9 +78,23 @@
                 already have a token? sign in
               </button>
             </div>
-            <div class="guest-actions">
+            <div class="account-actions">
               <button type="button" class="button primary small create-token">
                 create an access token
+              </button>
+            </div>
+          </aside>
+          <aside id="token-notice" class="account-notice" aria-label="access token" hidden>
+            <div>
+              <p><strong>your access token.</strong></p>
+              <p class="hint">
+                lost your token, or think someone else has it? regenerate it. your current token
+                stops working and other devices are signed out.
+              </p>
+            </div>
+            <div class="account-actions">
+              <button type="button" class="button secondary small" id="regenerate-token">
+                regenerate access token
               </button>
             </div>
           </aside>

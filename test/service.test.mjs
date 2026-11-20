@@ -681,6 +681,63 @@ test('guest cards stay live without a token and transfer ownership on sign-in', 
   }
 });
 
+test('regenerating a token keeps cards, revokes the old token and signs out other devices', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'linkbed-regenerate-'));
+  const { server, close } = createApp({ dbPath: join(directory, 'cards.sqlite') });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const request = (path, method = 'GET', data, cookie = '') =>
+    fetch(base + path, {
+      method,
+      headers: { 'content-type': 'application/json', origin: 'http://localhost:3000', cookie },
+      body: data === undefined ? undefined : JSON.stringify(data),
+    });
+  const cardTitles = async (cookie) =>
+    (await request('/api/cards', 'GET', undefined, cookie).then((r) => r.json())).map(
+      (item) => item.title,
+    );
+  try {
+    const signup = await request('/api/signup', 'POST', {});
+    const { token: oldToken } = await signup.json();
+    const laptop = sessionCookie(signup);
+    const phone = sessionCookie(await request('/api/login', 'POST', { token: oldToken }));
+    await request('/api/cards', 'POST', { ...card, slug: 'mine', title: 'mine' }, laptop);
+    const stranger = sessionCookie(await request('/api/signup', 'POST', {}));
+    await request('/api/cards', 'POST', { ...card, slug: 'theirs', title: 'theirs' }, stranger);
+    const guest = sessionCookie(await request('/api/guest', 'POST', {}));
+
+    assert.equal((await request('/api/regenerate-token', 'POST', {})).status, 401);
+    assert.equal((await request('/api/regenerate-token', 'POST', {}, guest)).status, 401);
+
+    const regenerated = await request('/api/regenerate-token', 'POST', {}, laptop);
+    assert.equal(regenerated.status, 201);
+    const { token: newToken } = await regenerated.json();
+    assert.match(newToken, /^lembed_[A-Za-z0-9_-]{43}$/);
+    const current = sessionCookie(regenerated);
+    assert.deepEqual(await cardTitles(current), ['mine']);
+    assert.deepEqual(await cardTitles(laptop), []);
+    assert.deepEqual(await cardTitles(phone), []);
+    assert.deepEqual(await cardTitles(stranger), ['theirs']);
+    assert.equal((await request('/api/login', 'POST', { token: oldToken })).status, 401);
+    const login = await request('/api/login', 'POST', { token: newToken });
+    assert.deepEqual(await cardTitles(sessionCookie(login)), ['mine']);
+
+    const racing = await Promise.all([
+      request('/api/regenerate-token', 'POST', {}, current),
+      request('/api/regenerate-token', 'POST', {}, current),
+    ]);
+    const winners = racing.filter((response) => response.status === 201);
+    assert.equal(winners.length, 1);
+    assert.deepEqual(await cardTitles(sessionCookie(winners[0])), ['mine']);
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+    await close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('removing card expiry preserves existing cards and restores their public links', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'linkbed-migrate-'));
   const dbPath = join(directory, 'cards.sqlite');

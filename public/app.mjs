@@ -797,6 +797,7 @@ async function api(path, options = {}) {
 
 function syncAccount() {
   $('#guest-notice').hidden = authenticated;
+  $('#token-notice').hidden = !authenticated;
   $('#publish-token-prompt').hidden = authenticated;
   if (newToken && !$('#account-new-token').open) $('#account-new-token').showModal();
   $('#sign-out').hidden = !authenticated || !!newToken;
@@ -1780,16 +1781,29 @@ document.querySelectorAll('.create-token').forEach((button) =>
     const result = await accountRequest('/api/signup');
     if (result) {
       authenticated = true;
-      newToken = result.token;
-      $('#new-token').textContent = newToken;
-      $('#download-token').removeAttribute('data-downloaded');
-      $('#download-token').textContent = 'download';
+      showNewToken(result.token);
       await refreshCards();
     }
     finishAuth();
     if (result) $('#copy-token').focus({ preventScroll: true });
   }),
 );
+$('#regenerate-token').addEventListener('click', async () => {
+  const message =
+    'regenerate your access token? your current token stops working and other devices are signed out.';
+  if (busy || !(await confirmAction(message, 'regenerate token'))) return;
+  resumeEditor = false;
+  const result = await accountRequest('/api/regenerate-token');
+  if (result) showNewToken(result.token);
+  finishAuth();
+  if (result) $('#copy-token').focus({ preventScroll: true });
+});
+function showNewToken(token) {
+  newToken = token;
+  $('#new-token').textContent = newToken;
+  $('#download-token').removeAttribute('data-downloaded');
+  $('#download-token').textContent = 'download';
+}
 const reportDialog = $('#report-dialog'),
   reportForm = $('#report-form'),
   reportUrl = $('#report-url'),
