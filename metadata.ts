@@ -141,9 +141,9 @@ export async function fetchMetadata(value: unknown): Promise<WebsiteMetadata> {
       deflate: createInflate,
       br: createBrotliDecompress,
     };
-    // Node joins duplicate encoding headers into a single string. An absent header
-    // looks up no decoder and falls through to the raw response.
-    const decompress = decompressors[response.headers['content-encoding'] as string];
+    const encoding = response.headers['content-encoding'];
+    const decompress =
+      encoding && Object.hasOwn(decompressors, encoding) ? decompressors[encoding] : undefined;
     const stream = decompress ? response.pipe(decompress()) : response;
     response.on('error', (error) => stream.destroy(error));
     let size = 0;
