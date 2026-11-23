@@ -34,6 +34,7 @@
   let signedIn = true;
   let signups = 0;
   let writes = 0;
+  let reads = 0;
   let copied = null;
   const clipboard = navigator.clipboard;
   const originalWriteText = Object.getOwnPropertyDescriptor(clipboard, 'writeText');
@@ -91,10 +92,12 @@
       card = JSON.parse(options.body);
       return Response.json(card);
     }
-    if (path === '/api/cards/editor-check' && method === 'GET')
+    if (path === '/api/cards/editor-check' && method === 'GET') {
+      reads++;
       return failRead
         ? Response.json({ error: 'saved card unavailable' }, { status: 503 })
         : Response.json(card);
+    }
     if (path === '/api/cards/editor-check' && method === 'PUT') {
       if (failWrite) return Response.json({ error: 'save failed' }, { status: 503 });
       writes++;
@@ -147,12 +150,15 @@
     await wait(() => copied === publicUrl);
     check(!$('#copy-card-link').hidden, 'notice copies published slug before an unsaved rename');
     input('#component-list textarea', 'unsaved content');
+    const readsBeforeCancel = reads;
     $('#clear-template').click();
     $('#confirm-dialog [value="cancel"]').click();
-    await wait(() => !$('#confirm-dialog').open);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    check($('#title').value === 'unsaved', 'cancel preserves edits');
+    check(!$('#confirm-dialog').open && $('#title').value === 'unsaved', 'cancel preserves edits');
     await confirmDiscard('#clear-template', () => $('#title').value === 'saved card');
+    check(
+      reads === readsBeforeCancel + 1 && !$('#reset').disabled,
+      'only the confirmed clear reads the saved card',
+    );
     check(
       $('#title').value === 'saved card' &&
         $('#slug').value === 'editor-check' &&
