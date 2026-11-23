@@ -155,7 +155,7 @@ test('SEO normalization omits empty overrides and validates titles and image URL
   }
 });
 
-test('page favicons normalize, omit blank values and render escaped links with the existing fallback', () => {
+test('page favicons normalize, omit blank values and render escaped links with the linkbed icon as the fallback', () => {
   const card = normalizeCard({ ...page, seo: { favicon: 'https://EXAMPLE.com/icon.ico?x=1&y=2' } });
   assert.deepEqual(card.seo, { favicon: 'https://example.com/icon.ico?x=1&y=2' });
   assert.deepEqual(importCardJson({ component: first, seo: card.seo }).seo, card.seo);
@@ -165,7 +165,7 @@ test('page favicons normalize, omit blank values and render escaped links with t
   );
   assert.match(
     renderCard(normalizeCard(page), 'https://linkbed.me/page'),
-    /<link rel="icon" href="https:\/\/github.com\/schmayterling.png\?size=64">/,
+    /<link rel="icon" href="\/favicon.svg">/,
   );
   for (const favicon of ['', '   ', null, undefined])
     assert.equal('seo' in normalizeCard({ ...page, seo: { favicon } }), false);
