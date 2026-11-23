@@ -1,11 +1,14 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http';
+import { handleAdminRequest } from './admin/routes.ts';
+import { readCustomBadges } from './card-badges.ts';
 import { openDatabase } from './database.ts';
 import type { Database } from './database.ts';
+import { body, fail, json } from './http.ts';
+import type { HandlerRequest } from './http.ts';
 import {
   normalizeCard,
   MAX_PAGE_BYTES,
-  normalizeCustomBadges,
   pageBadges,
   normalizeSlug,
   normalizeReportLink,
@@ -20,7 +23,7 @@ import type { Page } from './public/model.mts';
 import { fetchMetadata, publicUrl } from './metadata.ts';
 import { renderCard, renderEditor, renderNotFound } from './render.ts';
 
-export type HandlerRequest = IncomingMessage & { url: string; method: string; body?: unknown };
+export type { HandlerRequest } from './http.ts';
 
 export type HandlerOptions = NonNullable<Parameters<typeof openDatabase>[0]> & {
   origin?: string;
@@ -43,7 +46,6 @@ export const securityHeaders = {
   'content-security-policy':
     "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https: http:; media-src 'self' https: http:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
 };
-const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const clientAddress = (req: IncomingMessage) =>
   process.env.VERCEL
@@ -52,24 +54,6 @@ const clientAddress = (req: IncomingMessage) =>
     : req.socket?.remoteAddress;
 const cookie = (req: IncomingMessage, name: string) =>
   req.headers.cookie?.match(new RegExp('(?:^|;\\s*)' + name + '=([a-f0-9]{64})(?:;|$)'))?.[1];
-const json = (res: ServerResponse, status: number, data: unknown) => {
-  res.writeHead(status, {
-    'content-type': 'application/json; charset=utf-8',
-    'cache-control': 'no-store',
-  });
-  res.end(JSON.stringify(data));
-};
-
-function readCustomBadges(value: string | null) {
-  try {
-    const parsed: unknown = JSON.parse(value ?? 'null');
-    const badges = normalizeCustomBadges(parsed);
-    for (const badge of badges) publicUrl(badge.image, 'badge image url');
-    return badges;
-  } catch {
-    return [];
-  }
-}
 
 export function isLocalAdminRequest(
   req: { headers: IncomingHttpHeaders; socket?: { remoteAddress?: string } },
@@ -89,32 +73,6 @@ export function isLocalAdminRequest(
     loopback(req.socket?.remoteAddress) &&
     loopback(address)
   );
-}
-
-async function body(req: HandlerRequest, max = 16384): Promise<Record<string, unknown>> {
-  if (!req.headers['content-type']?.startsWith('application/json')) throw fail(415, 'send json.');
-  let value: unknown = req.body;
-  if (value === undefined) {
-    let size = 0;
-    const chunks: Buffer[] = [];
-    // Raw HTTP request streams yield buffers when no string encoding is set.
-    for await (const chunk of req as AsyncIterable<Buffer>) {
-      size += chunk.length;
-      if (size > max) throw fail(413, 'request is too large.');
-      chunks.push(chunk);
-    }
-    try {
-      // JSON.parse coerces its argument to text before parsing it.
-      value = (JSON.parse as (input: string | Buffer) => unknown)(Buffer.concat(chunks));
-    } catch {
-      throw fail(400, 'invalid json.');
-    }
-  }
-  if (Buffer.byteLength(JSON.stringify(value)) > max) throw fail(413, 'request is too large.');
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    throw fail(400, 'invalid json object.');
-  // The guard above excludes null, arrays and non-objects, so callers can check JSON fields by name.
-  return value as Record<string, unknown>;
 }
 
 const activeSessionSql =
@@ -305,6 +263,217 @@ export function createHandler(options: HandlerOptions = {}): Handler {
     if (row.count > max) throw fail(429, 'too many requests. wait a minute and try again.');
   }
 
+  async function handleHome(req: HandlerRequest, res: ServerResponse): Promise<ServerResponse> {
+    let card: Page | undefined;
+    let starter: unknown;
+    let initial;
+    try {
+      const db = await connect();
+      const result = await db.execute(
+        "SELECT slug, card FROM cards WHERE slug IN ('linkbed', 'may') AND NOT EXISTS (SELECT 1 FROM banned_slugs WHERE slug = cards.slug)",
+      );
+      // Both selected columns are TEXT on the cards table.
+      const rows = result.rows as { slug: string; card: string }[];
+      for (const row of rows) {
+        if (row.slug === 'linkbed') {
+          const saved: unknown = JSON.parse(row.card);
+          // The stored homepage card passed normalizeCard at publish time.
+          card = saved as Page;
+        } else starter = JSON.parse(row.card);
+      }
+      const current = await session(db, req);
+      initial = { ...sessionInfo(current), cards: await listCards(db, current) };
+    } catch (error) {
+      // Database and parser failures are Error objects with an optional code.
+      const failure = error as RequestError;
+      console.error('homepage embed unavailable:', failure.code || failure.name);
+    }
+    const html = renderEditor(card, canonical + '/', starter, initial);
+    res.writeHead(200, {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'private, no-store',
+      vary: 'Cookie',
+    });
+    return res.end(req.method === 'HEAD' ? undefined : html);
+  }
+
+  async function handleSavedCards(
+    db: Database,
+    req: HandlerRequest,
+    res: ServerResponse,
+    path: string,
+    visitor: Visitor | null,
+  ): Promise<void> {
+    const current = await session(db, req);
+    if (!current) {
+      if (path === '/api/cards' && req.method === 'GET') return json(res, 200, []);
+      throw fail(401, 'edit access expired. start a new card or sign in with your access token.');
+    }
+    const { owner } = current;
+    if (visitor) await linkOwner(db, owner, visitor);
+    const guard = visitor ? fingerprintGuard(visitor) : { sql: '1', args: [] };
+    const activeSession = activeSessionSql + ' AND ' + guard.sql;
+    const access = () => [current.hash, owner, Date.now(), ...guard.args];
+    if (path === '/api/cards' && req.method === 'GET') {
+      return json(res, 200, await listCards(db, current));
+    }
+    const api = path.match(/^\/api\/cards\/([a-z0-9-]+)$/);
+    if (api && req.method === 'GET') {
+      const result = await db.execute({
+        sql:
+          'SELECT card, revision, sponsored_at FROM cards WHERE slug = ? AND owner = ? AND ' +
+          activeSession,
+        args: [api[1], owner, ...access()],
+      });
+      if (!result.rows.length) throw fail(404, 'card not found.');
+      // This SELECT returns the persisted card and its revision and sponsorship.
+      const row = result.rows[0] as {
+        card: string;
+        revision: number;
+        sponsored_at: number | null;
+      };
+      const slug = api[1];
+      const saved: unknown = JSON.parse(row.card);
+      return json(res, 200, {
+        slug,
+        // The publish and edit routes store a normalized JSON object in cards.card.
+        ...(saved as Record<string, unknown>),
+        revision: row.revision,
+        sponsored: row.sponsored_at != null,
+      });
+    }
+    if (api && req.method === 'DELETE') {
+      const result = await db.execute({
+        sql:
+          'DELETE FROM cards WHERE slug = ? AND owner = ? AND ' + activeSession + ' RETURNING slug',
+        args: [api[1], owner, ...access()],
+      });
+      if (!result.rows.length) throw fail(404, 'card not found.');
+      return json(res, 200, { deleted: true });
+    }
+    const create = path === '/api/cards' && req.method === 'POST';
+    if (!create && !(api && req.method === 'PUT')) throw fail(405, 'method not allowed.');
+    const input = await body(req, MAX_PAGE_BYTES);
+    const slug = normalizeSlug(input.slug ?? api?.[1]);
+    const forbidden = await db.execute({
+      sql: 'SELECT slug FROM banned_slugs WHERE slug = ? OR slug = ?',
+      args: [slug, api?.[1] || slug],
+    });
+    if (forbidden.rows.length) throw fail(403, 'this link is banned.');
+    const now = Date.now();
+    const card = normalizeCard(input, `${canonical}/${slug}`);
+    if (card.url) publicUrl(card.url);
+    if (card.seo?.image) publicUrl(card.seo.image, 'seo image url');
+    if (card.seo?.favicon) publicUrl(card.seo.favicon, 'seo favicon url');
+    for (const link of cardComponents(card).flatMap(componentUrls))
+      publicUrl(link, 'component url', true);
+    let result;
+    try {
+      if (create) {
+        // Creating a card is a POST route that runs identify above.
+        const publisher = visitor as Visitor;
+        result = await db.execute({
+          sql:
+            'INSERT INTO cards (slug, owner, card, revision, updated_at, creator_fingerprint) SELECT ?, ?, ?, 1, ?, ? WHERE (SELECT COUNT(*) FROM cards WHERE owner = ?) < 100 AND ' +
+            activeSession +
+            ' AND NOT EXISTS (SELECT 1 FROM banned_slugs WHERE slug = ?) RETURNING revision',
+          args: [
+            slug,
+            owner,
+            JSON.stringify(card),
+            now,
+            publisher.fingerprint,
+            owner,
+            ...access(),
+            slug,
+          ],
+        });
+        if (!result.rows.length) {
+          if (!(await session(db, req)))
+            throw fail(401, 'edit access expired. sign in with your access token.');
+          throw fail(400, 'you have reached the 100-card limit.');
+        }
+      } else {
+        // The method guard requires a matching card route for PUT.
+        const previousSlug = (api as RegExpMatchArray)[1];
+        result = await db.execute({
+          sql:
+            "UPDATE cards SET slug = ?, card = ?, revision = revision + 1, updated_at = ?, verified_at = CASE WHEN slug = ? AND json_extract(card, '$.url') IS ? THEN verified_at ELSE NULL END WHERE slug = ? AND owner = ? AND " +
+            activeSession +
+            ' AND NOT EXISTS (SELECT 1 FROM banned_slugs WHERE slug = ? OR slug = ?) RETURNING revision',
+          args: [
+            slug,
+            JSON.stringify(card),
+            now,
+            slug,
+            card.url,
+            previousSlug,
+            owner,
+            ...access(),
+            slug,
+            previousSlug,
+          ],
+        });
+        if (!result.rows.length) throw fail(404, 'card not found.');
+      }
+    } catch (error) {
+      // The write throws driver errors or errors created by fail.
+      const failure = error as RequestError;
+      if (
+        String(failure.code).includes('SQLITE_CONSTRAINT') ||
+        /UNIQUE constraint failed/.test(failure.message)
+      )
+        throw fail(409, 'that link is taken. choose another.');
+      throw error;
+    }
+    // Both card writes return the INTEGER revision column.
+    const { revision } = result.rows[0] as { revision: number };
+    return json(res, create ? 201 : 200, {
+      slug,
+      revision,
+      url: `${canonical}/${slug}`,
+      freshUrl: `${canonical}/${slug}?v=${revision}`,
+      bytes: payloadBytes(card),
+      script: embedScript(card),
+    });
+  }
+
+  async function handlePublishedCard(
+    db: Database,
+    req: HandlerRequest,
+    res: ServerResponse,
+    slug: string,
+    embed: boolean,
+  ): Promise<ServerResponse> {
+    const result = await db.execute({
+      sql: 'SELECT card, sponsored_at, verified_at, custom_badges FROM cards WHERE slug = ? AND NOT EXISTS (SELECT 1 FROM banned_slugs WHERE slug = cards.slug)',
+      args: [slug],
+    });
+    if (!result.rows.length) throw fail(404, 'card not found.');
+    // This SELECT returns the card JSON and its three nullable badge columns.
+    const row = result.rows[0] as {
+      card: string;
+      sponsored_at: number | null;
+      verified_at: number | null;
+      custom_badges: string | null;
+    };
+    const saved: unknown = JSON.parse(row.card);
+    // The publish and edit routes run normalizeCard before storing this JSON.
+    const card = saved as Page;
+    const content = embed
+      ? embedJson(card)
+      : renderCard(card, `${canonical}/${slug}`, {
+          sponsoredAt: row.sponsored_at,
+          verifiedAt: row.verified_at,
+          customBadges: readCustomBadges(row.custom_badges),
+        });
+    res.writeHead(200, {
+      'content-type': embed ? 'application/json; charset=utf-8' : 'text/html; charset=utf-8',
+      'cache-control': embed ? 'no-store' : 'public, max-age=60',
+    });
+    return res.end(req.method === 'HEAD' ? undefined : content);
+  }
+
   async function handle(req: HandlerRequest, res: ServerResponse): Promise<ServerResponse | void> {
     for (const [key, value] of Object.entries(securityHeaders)) res.setHeader(key, value);
     if (canonical.startsWith('https:'))
@@ -352,39 +521,7 @@ export function createHandler(options: HandlerOptions = {}): Handler {
       )
         throw fail(404, 'page not found.');
 
-      if (path === '/' && ['GET', 'HEAD'].includes(req.method)) {
-        let card: Page | undefined;
-        let starter: unknown;
-        let initial;
-        try {
-          const db = await connect();
-          const result = await db.execute(
-            "SELECT slug, card FROM cards WHERE slug IN ('linkbed', 'may') AND NOT EXISTS (SELECT 1 FROM banned_slugs WHERE slug = cards.slug)",
-          );
-          // Both selected columns are TEXT on the cards table.
-          const rows = result.rows as { slug: string; card: string }[];
-          for (const row of rows) {
-            if (row.slug === 'linkbed') {
-              const saved: unknown = JSON.parse(row.card);
-              // The stored homepage card passed normalizeCard at publish time.
-              card = saved as Page;
-            } else starter = JSON.parse(row.card);
-          }
-          const current = await session(db, req);
-          initial = { ...sessionInfo(current), cards: await listCards(db, current) };
-        } catch (error) {
-          // Database and parser failures are Error objects with an optional code.
-          const failure = error as RequestError;
-          console.error('homepage embed unavailable:', failure.code || failure.name);
-        }
-        const html = renderEditor(card, canonical + '/', starter, initial);
-        res.writeHead(200, {
-          'content-type': 'text/html; charset=utf-8',
-          'cache-control': 'private, no-store',
-          vary: 'Cookie',
-        });
-        return res.end(req.method === 'HEAD' ? undefined : html);
-      }
+      if (path === '/' && ['GET', 'HEAD'].includes(req.method)) return await handleHome(req, res);
       const db = await connect();
       if (write) {
         const origins: (string | undefined)[] = admin
@@ -435,190 +572,7 @@ export function createHandler(options: HandlerOptions = {}): Handler {
           throw fail(404, 'that link could not be found or reporting is unavailable.');
         return json(res, 201, { reported: true });
       }
-      if (admin) {
-        if (req.method === 'GET' && ['/api/admin/cards', '/api/admin/reports'].includes(path)) {
-          const offset = Number(url.searchParams.get('offset') || 0);
-          if (!Number.isSafeInteger(offset) || offset < 0 || offset > 10000000)
-            throw fail(400, 'invalid page.');
-          const search = (url.searchParams.get('q') || '').trim();
-          if (search.length > 200) throw fail(400, 'search is too long.');
-          const reports = path === '/api/admin/reports';
-          const result = await db.execute(
-            reports
-              ? {
-                  sql: "SELECT r.id, r.slug, r.url, r.reason, r.details, r.created_at, r.reporter_fingerprint, json_extract(c.card, '$.title') AS title, c.sponsored_at, c.verified_at, c.custom_badges, c.creator_fingerprint, c.slug IS NULL AS removed, (SELECT token_hash FROM accounts WHERE token_hash = c.owner AND revoked_at IS NULL) AS token_hash, EXISTS (SELECT 1 FROM banned_slugs WHERE slug = r.slug) AS banned FROM abuse_reports r LEFT JOIN cards c ON c.slug = r.slug WHERE r.resolved_at IS NULL ORDER BY r.created_at, r.id LIMIT 51 OFFSET ?",
-                  args: [offset],
-                }
-              : {
-                  sql: "SELECT c.slug, json_extract(c.card, '$.title') AS title, json_extract(c.card, '$.url') AS destination, c.revision, c.updated_at, c.sponsored_at, c.verified_at, c.custom_badges, c.creator_fingerprint, (SELECT token_hash FROM accounts WHERE token_hash = c.owner AND revoked_at IS NULL) AS token_hash, EXISTS (SELECT 1 FROM banned_slugs WHERE slug = c.slug) AS banned FROM cards c WHERE instr(lower(c.slug), lower(?)) > 0 OR instr(lower(c.card), lower(?)) > 0 ORDER BY c.updated_at DESC, c.slug LIMIT 51 OFFSET ?",
-                  args: [search, search, offset],
-                },
-          );
-          // Both admin queries select the slug and nullable custom-badge JSON.
-          const rows = result.rows as { slug: string; custom_badges: string | null }[];
-          return json(res, 200, {
-            items: rows.slice(0, 50).map(({ custom_badges, ...row }) => ({
-              ...row,
-              customBadges: readCustomBadges(custom_badges),
-              link: canonical + '/' + row.slug,
-            })),
-            hasMore: result.rows.length > 50,
-          });
-        }
-        if (
-          req.method === 'GET' &&
-          ['/api/admin/tokens', '/api/admin/fingerprints', '/api/admin/slugs'].includes(path)
-        ) {
-          const offset = Number(url.searchParams.get('offset') || 0);
-          if (!Number.isSafeInteger(offset) || offset < 0 || offset > 10000000)
-            throw fail(400, 'invalid page.');
-          const queries = {
-            '/api/admin/tokens':
-              'SELECT a.token_hash, a.created_at, a.revoked_at, (SELECT COUNT(*) FROM cards WHERE owner = a.token_hash) AS cards FROM accounts a ORDER BY a.created_at DESC, a.token_hash LIMIT 51 OFFSET ?',
-            '/api/admin/fingerprints':
-              'SELECT f.fingerprint, f.created_at, f.banned_at, f.reporting_banned_at, (SELECT COUNT(*) FROM owner_fingerprints WHERE fingerprint = f.fingerprint) AS identities FROM creator_fingerprints f ORDER BY f.created_at DESC, f.fingerprint LIMIT 51 OFFSET ?',
-            '/api/admin/slugs':
-              'SELECT slug, banned_at FROM banned_slugs ORDER BY banned_at DESC, slug LIMIT 51 OFFSET ?',
-          };
-          // The route check above lists exactly the three keys of queries.
-          const result = await db.execute({
-            sql: queries[path as keyof typeof queries],
-            args: [offset],
-          });
-          return json(res, 200, {
-            items: result.rows.slice(0, 50),
-            hasMore: result.rows.length > 50,
-          });
-        }
-        const slugBan = path.match(/^\/api\/admin\/slugs\/([a-z0-9-]+)\/(ban|unban)$/);
-        if (slugBan && req.method === 'POST') {
-          await body(req);
-          const slug = normalizeSlug(slugBan[1]);
-          await db.execute(
-            slugBan[2] === 'ban'
-              ? {
-                  sql: 'INSERT INTO banned_slugs (slug, banned_at) VALUES (?, ?) ON CONFLICT(slug) DO NOTHING',
-                  args: [slug, Date.now()],
-                }
-              : { sql: 'DELETE FROM banned_slugs WHERE slug = ?', args: [slug] },
-          );
-          return json(res, 200, { banned: slugBan[2] === 'ban' });
-        }
-        const fingerprintBan = path.match(
-          /^\/api\/admin\/fingerprints\/([a-f0-9]{64})\/(ban|unban|ban-reporting|unban-reporting)$/,
-        );
-        if (fingerprintBan && req.method === 'POST') {
-          await body(req);
-          const [, fingerprint, action] = fingerprintBan;
-          const reporting = action.endsWith('reporting'),
-            ban = action.startsWith('ban');
-          const column = reporting ? 'reporting_banned_at' : 'banned_at';
-          const commands = [
-            {
-              sql:
-                'UPDATE creator_fingerprints SET ' +
-                column +
-                ' = ? WHERE fingerprint = ? RETURNING fingerprint',
-              args: [ban ? Date.now() : null, fingerprint],
-            },
-          ];
-          if (ban && !reporting)
-            commands.push(
-              {
-                sql: 'UPDATE accounts SET revoked_at = COALESCE(revoked_at, ?) WHERE token_hash IN (SELECT owner FROM owner_fingerprints WHERE fingerprint = ?)',
-                args: [Date.now(), fingerprint],
-              },
-              {
-                sql: 'DELETE FROM sessions WHERE owner IN (SELECT owner FROM owner_fingerprints WHERE fingerprint = ?)',
-                args: [fingerprint],
-              },
-            );
-          const results = await db.batch(commands, 'write');
-          if (!results[0].rows.length) throw fail(404, 'fingerprint not found.');
-          return json(res, 200, { banned: ban });
-        }
-        const tokenRevoke = path.match(/^\/api\/admin\/tokens\/([a-f0-9]{64})\/revoke$/);
-        if (tokenRevoke && req.method === 'POST') {
-          await body(req);
-          const results = await db.batch(
-            [
-              {
-                sql: 'UPDATE accounts SET revoked_at = COALESCE(revoked_at, ?) WHERE token_hash = ? RETURNING token_hash',
-                args: [Date.now(), tokenRevoke[1]],
-              },
-              { sql: 'DELETE FROM sessions WHERE owner = ?', args: [tokenRevoke[1]] },
-            ],
-            'write',
-          );
-          if (!results[0].rows.length) throw fail(404, 'token not found.');
-          return json(res, 200, { revoked: true });
-        }
-        const report = path.match(/^\/api\/admin\/reports\/([1-9]\d*)\/dismiss$/);
-        if (report && req.method === 'POST') {
-          await body(req);
-          const id = Number(report[1]);
-          if (!Number.isSafeInteger(id)) throw fail(400, 'invalid report.');
-          const result = await db.execute({
-            sql: 'UPDATE abuse_reports SET resolved_at = ? WHERE id = ? AND resolved_at IS NULL RETURNING id',
-            args: [Date.now(), id],
-          });
-          if (!result.rows.length) throw fail(404, 'report not found.');
-          return json(res, 200, { dismissed: true });
-        }
-        const statusBadge = path.match(/^\/api\/admin\/cards\/([a-z0-9-]+)\/(sponsor|verify)$/);
-        if (statusBadge && ['POST', 'DELETE'].includes(req.method)) {
-          if (req.method === 'POST') await body(req);
-          // The second regex capture is either sponsor or verify.
-          const column = { sponsor: 'sponsored_at', verify: 'verified_at' }[
-            statusBadge[2] as 'sponsor' | 'verify'
-          ];
-          const result = await db.execute({
-            sql:
-              'UPDATE cards SET ' +
-              column +
-              ' = ' +
-              (req.method === 'POST' ? 'COALESCE(' + column + ', ?)' : '?') +
-              ' WHERE slug = ? RETURNING ' +
-              column,
-            args: [req.method === 'POST' ? Date.now() : null, statusBadge[1]],
-          });
-          if (!result.rows.length) throw fail(404, 'card not found.');
-          // UPDATE returns the selected nullable timestamp column.
-          const updatedAt = result.rows[0][column] as number | null;
-          return json(res, 200, { [column]: updatedAt });
-        }
-        const customBadges = path.match(/^\/api\/admin\/cards\/([a-z0-9-]+)\/badges$/);
-        if (customBadges && req.method === 'PUT') {
-          const input = await body(req, 65536);
-          if (Object.keys(input).length !== 1 || !Object.hasOwn(input, 'badges'))
-            throw fail(400, 'provide a badges array.');
-          const badges = normalizeCustomBadges(input.badges);
-          for (const badge of badges) publicUrl(badge.image, 'badge image url');
-          const result = await db.execute({
-            sql: 'UPDATE cards SET custom_badges = ? WHERE slug = ? RETURNING custom_badges',
-            args: [badges.length ? JSON.stringify(badges) : null, customBadges[1]],
-          });
-          if (!result.rows.length) throw fail(404, 'card not found.');
-          // UPDATE returns the nullable TEXT column just assigned above.
-          const row = result.rows[0] as { custom_badges: string | null };
-          return json(res, 200, { customBadges: readCustomBadges(row.custom_badges) });
-        }
-        const card = path.match(/^\/api\/admin\/cards\/([a-z0-9-]+)$/);
-        if (card && req.method === 'DELETE') {
-          const results = await db.batch(
-            [
-              { sql: 'DELETE FROM cards WHERE slug = ? RETURNING slug', args: [card[1]] },
-              {
-                sql: 'UPDATE abuse_reports SET resolved_at = ? WHERE slug = ? AND resolved_at IS NULL',
-                args: [Date.now(), card[1]],
-              },
-            ],
-            'write',
-          );
-          return json(res, 200, { deleted: results[0].rows.length > 0 });
-        }
-        throw fail(404, 'page not found.');
-      }
+      if (admin) return await handleAdminRequest(db, req, res, path, url.searchParams, canonical);
       if (req.method === 'GET' && path === '/api/session')
         return json(res, 200, sessionInfo(await session(db, req)));
       if (req.method === 'POST' && path === '/api/guest') {
@@ -793,182 +747,13 @@ export function createHandler(options: HandlerOptions = {}): Handler {
           throw fail(400, 'could not import that website. fill in the card manually.');
         }
       }
-      if (path === '/api/cards' || path.startsWith('/api/cards/')) {
-        const current = await session(db, req);
-        if (!current) {
-          if (path === '/api/cards' && req.method === 'GET') return json(res, 200, []);
-          throw fail(
-            401,
-            'edit access expired. start a new card or sign in with your access token.',
-          );
-        }
-        const { owner } = current;
-        if (write) {
-          // Non-admin card writes always identify the visitor before entering this branch.
-          await linkOwner(db, owner, visitor as Visitor);
-        }
-        const guard = visitor ? fingerprintGuard(visitor) : { sql: '1', args: [] };
-        const activeSession = activeSessionSql + ' AND ' + guard.sql;
-        const access = () => [current.hash, owner, Date.now(), ...guard.args];
-        if (path === '/api/cards' && req.method === 'GET') {
-          return json(res, 200, await listCards(db, current));
-        }
-        const api = path.match(/^\/api\/cards\/([a-z0-9-]+)$/);
-        if (api && req.method === 'GET') {
-          const result = await db.execute({
-            sql:
-              'SELECT card, revision, sponsored_at FROM cards WHERE slug = ? AND owner = ? AND ' +
-              activeSession,
-            args: [api[1], owner, ...access()],
-          });
-          if (!result.rows.length) throw fail(404, 'card not found.');
-          // This SELECT returns the persisted card and its revision and sponsorship.
-          const row = result.rows[0] as {
-            card: string;
-            revision: number;
-            sponsored_at: number | null;
-          };
-          const slug = api[1];
-          const saved: unknown = JSON.parse(row.card);
-          return json(res, 200, {
-            slug,
-            // The publish and edit routes store a normalized JSON object in cards.card.
-            ...(saved as Record<string, unknown>),
-            revision: row.revision,
-            sponsored: row.sponsored_at != null,
-          });
-        }
-        if (api && req.method === 'DELETE') {
-          const result = await db.execute({
-            sql:
-              'DELETE FROM cards WHERE slug = ? AND owner = ? AND ' +
-              activeSession +
-              ' RETURNING slug',
-            args: [api[1], owner, ...access()],
-          });
-          if (!result.rows.length) throw fail(404, 'card not found.');
-          return json(res, 200, { deleted: true });
-        }
-        const create = path === '/api/cards' && req.method === 'POST';
-        if (!create && !(api && req.method === 'PUT')) throw fail(405, 'method not allowed.');
-        const input = await body(req, MAX_PAGE_BYTES);
-        const slug = normalizeSlug(input.slug ?? api?.[1]);
-        const forbidden = await db.execute({
-          sql: 'SELECT slug FROM banned_slugs WHERE slug = ? OR slug = ?',
-          args: [slug, api?.[1] || slug],
-        });
-        if (forbidden.rows.length) throw fail(403, 'this link is banned.');
-        const now = Date.now();
-        const card = normalizeCard(input, `${canonical}/${slug}`);
-        if (card.url) publicUrl(card.url);
-        if (card.seo?.image) publicUrl(card.seo.image, 'seo image url');
-        if (card.seo?.favicon) publicUrl(card.seo.favicon, 'seo favicon url');
-        for (const link of cardComponents(card).flatMap(componentUrls))
-          publicUrl(link, 'component url', true);
-        let result;
-        try {
-          if (create) {
-            // Creating a card is a POST route that runs identify above.
-            const publisher = visitor as Visitor;
-            result = await db.execute({
-              sql:
-                'INSERT INTO cards (slug, owner, card, revision, updated_at, creator_fingerprint) SELECT ?, ?, ?, 1, ?, ? WHERE (SELECT COUNT(*) FROM cards WHERE owner = ?) < 100 AND ' +
-                activeSession +
-                ' AND NOT EXISTS (SELECT 1 FROM banned_slugs WHERE slug = ?) RETURNING revision',
-              args: [
-                slug,
-                owner,
-                JSON.stringify(card),
-                now,
-                publisher.fingerprint,
-                owner,
-                ...access(),
-                slug,
-              ],
-            });
-            if (!result.rows.length) {
-              if (!(await session(db, req)))
-                throw fail(401, 'edit access expired. sign in with your access token.');
-              throw fail(400, 'you have reached the 100-card limit.');
-            }
-          } else {
-            // The method guard requires a matching card route for PUT.
-            const previousSlug = (api as RegExpMatchArray)[1];
-            result = await db.execute({
-              sql:
-                "UPDATE cards SET slug = ?, card = ?, revision = revision + 1, updated_at = ?, verified_at = CASE WHEN slug = ? AND json_extract(card, '$.url') IS ? THEN verified_at ELSE NULL END WHERE slug = ? AND owner = ? AND " +
-                activeSession +
-                ' AND NOT EXISTS (SELECT 1 FROM banned_slugs WHERE slug = ? OR slug = ?) RETURNING revision',
-              args: [
-                slug,
-                JSON.stringify(card),
-                now,
-                slug,
-                card.url,
-                previousSlug,
-                owner,
-                ...access(),
-                slug,
-                previousSlug,
-              ],
-            });
-            if (!result.rows.length) throw fail(404, 'card not found.');
-          }
-        } catch (error) {
-          // The write throws driver errors or errors created by fail.
-          const failure = error as RequestError;
-          if (
-            String(failure.code).includes('SQLITE_CONSTRAINT') ||
-            /UNIQUE constraint failed/.test(failure.message)
-          )
-            throw fail(409, 'that link is taken. choose another.');
-          throw error;
-        }
-        // Both card writes return the INTEGER revision column.
-        const { revision } = result.rows[0] as { revision: number };
-        return json(res, create ? 201 : 200, {
-          slug,
-          revision,
-          url: `${canonical}/${slug}`,
-          freshUrl: `${canonical}/${slug}?v=${revision}`,
-          bytes: payloadBytes(card),
-          script: embedScript(card),
-        });
-      }
+      if (path === '/api/cards' || path.startsWith('/api/cards/'))
+        return await handleSavedCards(db, req, res, path, visitor);
       const publicPage = path.match(/^\/(?:p\/)?([a-z0-9-]+)$/);
       const publicEmbed = path.match(/^\/api\/embeds\/([a-z0-9-]+)$/);
-      if ((publicPage || publicEmbed) && ['GET', 'HEAD'].includes(req.method)) {
-        const slug = (publicPage || publicEmbed)![1];
-        const result = await db.execute({
-          sql: 'SELECT card, sponsored_at, verified_at, custom_badges FROM cards WHERE slug = ? AND NOT EXISTS (SELECT 1 FROM banned_slugs WHERE slug = cards.slug)',
-          args: [slug],
-        });
-        if (!result.rows.length) throw fail(404, 'card not found.');
-        // This SELECT returns the card JSON and its three nullable badge columns.
-        const row = result.rows[0] as {
-          card: string;
-          sponsored_at: number | null;
-          verified_at: number | null;
-          custom_badges: string | null;
-        };
-        const saved: unknown = JSON.parse(row.card);
-        // The publish and edit routes run normalizeCard before storing this JSON.
-        const card = saved as Page;
-        const content = publicEmbed
-          ? embedJson(card)
-          : renderCard(card, `${canonical}/${slug}`, {
-              sponsoredAt: row.sponsored_at,
-              verifiedAt: row.verified_at,
-              customBadges: readCustomBadges(row.custom_badges),
-            });
-        res.writeHead(200, {
-          'content-type': publicEmbed
-            ? 'application/json; charset=utf-8'
-            : 'text/html; charset=utf-8',
-          'cache-control': publicEmbed ? 'no-store' : 'public, max-age=60',
-        });
-        return res.end(req.method === 'HEAD' ? undefined : content);
-      }
+      const slug = (publicPage || publicEmbed)?.[1];
+      if (slug && ['GET', 'HEAD'].includes(req.method))
+        return await handlePublishedCard(db, req, res, slug, !!publicEmbed);
       throw fail(404, 'page not found.');
     } catch (error) {
       // HTTP failures carry status, while parser and driver errors may carry code.
