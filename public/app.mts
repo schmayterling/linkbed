@@ -23,49 +23,48 @@ import {
   MAX_BYTES,
   MAX_CARDS,
   MAX_PAGE_BYTES,
-  PAGE_COLORS,
   cardComponents,
   seoMetadata,
 } from './model.mts';
 import {
   createComposer,
-  renderComponent,
   fieldValidator,
   autoFormatField,
   collapseDragZone,
 } from './components.mts';
 import { importCardJson, messageJson, linkedEmbedCode } from './interchange.mts';
 import { icon, mountIcons } from './icons.mts';
-import type { Page, PageBadge, PageCard, PageColors, PageColorKey, PageTheme } from './model.mts';
+import type { Page, PageBadge, PageCard, PageTheme } from './model.mts';
 import type { JsonEditor } from './code-editor.mts';
 import Coloris from './vendor/coloris.mjs';
 import Sortable from './vendor/sortable.mjs';
-
-function $<T extends HTMLElement = HTMLElement>(
-  selector: string,
-  type?: { new (): T },
-  root: ParentNode = document,
-): T {
-  const node = root.querySelector<T>(selector);
-  if (!node || (type && !(node instanceof type)))
-    throw new Error('missing editor element: ' + selector);
-  return node;
-}
+import { $, element } from './editor-dom.mts';
+import {
+  bindPageAppearance,
+  bindPreviewModes,
+  createPagePaletteChecks,
+  fillPageAppearance,
+  initPreviewTheme,
+  mountPagePalettes,
+  pageTheme,
+  readPageAppearance,
+  renderDiscordPreview,
+  renderPagePreview,
+  syncPageAppearance,
+  syncPageSwatches,
+} from './editor-preview.mts';
+import type { PreviewMode } from './editor-preview.mts';
+import { renderSavedCards } from './saved-cards.mts';
+import type { SavedCard } from './saved-cards.mts';
 
 type EditorCard = Partial<Page> & { sponsored?: boolean };
-type SavedCard = Page & { slug: string; sponsored: boolean; badges: PageBadge[] };
 type View = 'editor' | 'cards';
 type EditorTab = 'edit' | 'preview';
-type PreviewMode = 'discord' | 'page';
 type FormControl = HTMLInputElement | HTMLTextAreaElement | HTMLButtonElement | HTMLSelectElement;
 type EditorError = { message: string; label?: string; input?: HTMLElement; cardIndex?: number };
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'request failed.';
-}
-
-function pageTheme(value: unknown): PageTheme | undefined {
-  return value === 'light' || value === 'dark' ? value : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -104,41 +103,7 @@ const seoFields = {
   image: $('#seo-image', HTMLInputElement),
   favicon: $('#seo-favicon', HTMLInputElement),
 };
-const themes = ['light', 'dark'] as const;
-const colorKeys = ['background', 'text', 'card', 'links', 'button', 'button_text'] as const;
-const pageColorFields: Record<PageTheme, Map<PageColorKey, HTMLInputElement>> = {
-  light: new Map(),
-  dark: new Map(),
-};
-for (const mode of themes) {
-  for (const name of colorKeys) {
-    const value = PAGE_COLORS[mode][name];
-    const label = element(
-      'label',
-      name === 'button_text' ? 'button text' : name === 'button' ? 'button background' : name,
-    );
-    const input = element('input');
-    input.type = 'text';
-    input.id = 'page-' + mode + '-' + name;
-    input.className = 'page-palette-color';
-    input.value = value;
-    input.maxLength = 7;
-    input.spellcheck = false;
-    input.dataset.coloris = '';
-    input.setAttribute('aria-label', mode + ' mode ' + name);
-    autoFormatField(input, formatColor);
-    const swatch = element('div', undefined, 'clr-field');
-    const button = element('button');
-    button.type = 'button';
-    button.setAttribute('aria-label', 'choose ' + mode + ' ' + name);
-    swatch.style.color = value;
-    swatch.append(button, input);
-    label.htmlFor = input.id;
-    label.append(swatch);
-    $('[data-palette="' + mode + '"]').append(label);
-    pageColorFields[mode].set(name, input);
-  }
-}
+mountPagePalettes();
 let loading = false,
   jsonDirty = false,
   jsonEditor: JsonEditor | undefined;
@@ -196,11 +161,7 @@ const fieldChecks = [
     (value) => (value.trim() ? httpsUrl(value.trim(), 'favicon url') : null),
     'favicon url',
   ),
-  ...themes.flatMap((mode) =>
-    Array.from(pageColorFields[mode], ([name, input]) =>
-      fieldValidator(input, normalizeColor, mode + ' ' + name),
-    ),
-  ),
+  ...createPagePaletteChecks(),
   fieldValidator(
     fields.url,
     (value) => destinationUrl(value.trim(), cardUrl(fields.slug.value)),
@@ -242,17 +203,6 @@ const canonical = document.querySelector<HTMLMetaElement>('meta[property="og:url
 const publicOrigin = new URL(canonical || location.origin).origin;
 const publicHost = new URL(publicOrigin).host;
 const cardUrl = (slug: string) => publicOrigin + '/' + slug;
-
-function element<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  text?: string,
-  className?: string,
-): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  if (text !== undefined) node.textContent = text;
-  if (className) node.className = className;
-  return node;
-}
 
 function toast(message: string) {
   $('#toast').textContent = message;
@@ -414,17 +364,7 @@ function draft() {
       .map(([name, input]) => [name, input.value.trim()])
       .filter(([, value]) => value),
   );
-  const pageColors: PageColors = {};
-  for (const mode of themes) {
-    const overrides = Object.fromEntries(
-      [...pageColorFields[mode]]
-        .filter(([name, input]) => input.value !== PAGE_COLORS[mode][name])
-        .map(([name, input]) => [name, input.value]),
-    );
-    if (Object.keys(overrides).length) pageColors[mode] = overrides;
-  }
-  const theme = pageTheme($('#page-theme', HTMLSelectElement).value);
-  const colorScheme = pageTheme($('#page-color-scheme', HTMLSelectElement).value);
+  const appearance = readPageAppearance();
   const previewCard =
     pageCards[
       selectedEmbedIndex({
@@ -443,9 +383,7 @@ function draft() {
         : '#' + previewCard.accent_color.toString(16).padStart(6, '0'),
     component: pageCards[0],
     ...(!$('#show-sponsor', HTMLInputElement).checked ? { sponsor_hidden: true } : {}),
-    ...(theme ? { page_theme: theme } : {}),
-    ...(colorScheme ? { page_color_scheme: colorScheme } : {}),
-    ...(Object.keys(pageColors).length ? { page_colors: pageColors } : {}),
+    ...appearance,
     ...(pageCards.length > 1 ? { additional_cards: pageCards.slice(1) } : {}),
     ...(embedCard !== null ? { embed_card: embedCard } : {}),
     ...(Object.keys(seo).length ? { seo } : {}),
@@ -567,22 +505,14 @@ function update() {
   const roots = cardComponents(card);
   const current = roots[activeCard];
   const multiple = roots.length > 1;
-  const pagePreview = previewMode === 'page' && (!card.url || pageTools);
   $('#delete-card', HTMLButtonElement).hidden = !editing;
   $('#perk-management').hidden = !sponsored;
   const previewRoot = buildEmbed(card).component;
-  if (previewRoot) renderComponent($('#preview-card'), previewRoot);
-  else $('#preview-card').replaceChildren();
+  renderDiscordPreview(previewRoot);
   $('#enable-page-tools', HTMLInputElement).checked = pageTools;
   $('#page-management-controls').hidden = !pageTools;
   $('#page-link-warning').hidden = !card.url;
-  $('.page-appearance').hidden = !pageTools;
-  $('#reset-page-appearance', HTMLButtonElement).disabled =
-    busy || !(card.page_theme || card.page_colors || card.page_color_scheme);
-  for (const mode of themes) {
-    const fieldset = $('[data-palette="' + mode + '"]').closest('fieldset');
-    if (fieldset) fieldset.hidden = !!card.page_color_scheme && card.page_color_scheme !== mode;
-  }
+  syncPageAppearance(card, pageTools, busy);
   fields.url.disabled = busy;
   $('#destination-hint').textContent = 'leave blank to keep visitors on this page.';
   $('#page-card-actions').hidden = !pageTools;
@@ -591,36 +521,9 @@ function update() {
     $(button, HTMLButtonElement).disabled = busy || jsonDirty || roots.length >= MAX_CARDS;
   for (const selector of ['.add-component-heading', '.add-component', '.templates'])
     $('#page-card-fields ' + selector).hidden = isBadgeCase(current);
-  $('#preview-scope').hidden = !!card.url && !pageTools;
-  $('#discord-preview-message').hidden = pagePreview;
-  $('#page-preview-cards').hidden = !pagePreview;
-  $('.discord-window').classList.toggle('is-page-preview', pagePreview);
-  $('#preview-heading').textContent = pagePreview ? 'your page' : 'showcase';
-  document.querySelectorAll<HTMLButtonElement>('[data-preview-mode]').forEach((button) => {
-    button.setAttribute(
-      'aria-pressed',
-      String(button.dataset.previewMode === (pagePreview ? 'page' : 'discord')),
-    );
-  });
-  if (pagePreview) {
-    $('#page-preview-cards').replaceChildren(
-      ...roots.map((root) => {
-        const preview = element('article', undefined, 'discord-card');
-        renderComponent(preview, root);
-        return preview;
-      }),
-    );
-  }
-  syncPagePreview(card, pagePreview);
+  const pagePreview = renderPagePreview(card, roots, previewMode, pageTools);
   renderCardEditors();
-  for (const mode of themes) {
-    for (const [name, input] of pageColorFields[mode]) {
-      if (input.parentElement)
-        input.parentElement.style.color = /^#[0-9a-f]{6}$/i.test(input.value)
-          ? input.value
-          : PAGE_COLORS[mode][name];
-    }
-  }
+  syncPageSwatches();
   const metadata = seoMetadata(card);
   seoFields.title.placeholder = card.title || 'use card name';
   const generatedMetadata = seoMetadata({ ...card, seo: undefined, description: '' });
@@ -835,11 +738,7 @@ function fill(card: EditorCard, slug = '') {
     fields[name].value = card[name] ?? '';
   for (const name of ['title', 'image', 'favicon'] as const)
     seoFields[name].value = card.seo?.[name] ?? '';
-  $('#page-theme', HTMLSelectElement).value = card.page_theme || 'auto';
-  $('#page-color-scheme', HTMLSelectElement).value = card.page_color_scheme || 'auto';
-  for (const mode of themes)
-    for (const [name, input] of pageColorFields[mode])
-      input.value = card.page_colors?.[mode]?.[name] || PAGE_COLORS[mode][name];
+  fillPageAppearance(card);
   pageCards = cardComponents({
     title: '',
     description: '',
@@ -990,8 +889,6 @@ async function deleteCard(slug: string, errorNode: HTMLElement) {
   }
 }
 
-const savedCardPlural = new Intl.PluralRules('en');
-
 async function refreshCards(initial?: unknown) {
   const version = ++refreshVersion;
   try {
@@ -1007,77 +904,13 @@ async function refreshCards(initial?: unknown) {
       update();
     }
     syncAccount();
-    const count = cards.length;
-    const noun = savedCardPlural.select(count) === 'one' ? 'card' : 'cards';
-    $('#card-count').textContent = `${count} saved ${noun}`;
-    $('#saved-list').replaceChildren(
-      ...cards.map((card) => {
-        const tile = element('article', undefined, 'saved-card');
-        const open = element('button', undefined, 'saved-preview');
-        open.type = 'button';
-        open.setAttribute('aria-label', 'edit card: ' + card.title);
-        const preview = element('div', undefined, 'discord-card');
-        const root = buildEmbed(card).component;
-        if (root) renderComponent(preview, root);
-        preview.inert = true;
-        open.append(preview);
-        open.addEventListener('click', () => openCard(card));
-        const footer = element('div', undefined, 'saved-footer');
-        footer.title = card.title;
-        const remove = element('button', undefined, 'saved-delete');
-        remove.type = 'button';
-        remove.append(icon('trash-2'));
-        remove.title = 'delete';
-        remove.setAttribute('aria-label', 'delete card: ' + card.title);
-        remove.addEventListener('click', () => deleteCard(card.slug, $('#account-error')));
-        const url = element('a', undefined, 'saved-url');
-        url.append(element('span', '/' + card.slug, 'saved-url-label'));
-        url.href = cardUrl(card.slug);
-        url.target = '_blank';
-        url.rel = 'noopener noreferrer';
-        url.title = location.host + '/' + card.slug;
-        const external = icon('external-link');
-        external.classList.add('saved-external');
-        url.append(external);
-        const copyLink = element('button', undefined, 'text-button saved-copy');
-        copyLink.type = 'button';
-        copyLink.append(icon('copy'));
-        copyLink.title = 'copy link';
-        copyLink.setAttribute('aria-label', 'copy link: ' + card.title);
-        copyLink.addEventListener('click', () => copy(cardUrl(card.slug)));
-        const link = element('div', undefined, 'saved-link');
-        link.append(url);
-        for (const badge of card.badges || []) {
-          const tag = element('span', undefined, 'saved-badge');
-          tag.title = badge.name;
-          tag.setAttribute('role', 'img');
-          tag.setAttribute('aria-label', badge.name);
-          if (badge.icon) {
-            tag.append(icon(badge.icon));
-          } else {
-            const image = element('img');
-            image.src = badge.image;
-            image.alt = '';
-            image.width = image.height = 16;
-            image.referrerPolicy = 'no-referrer';
-            tag.append(image);
-          }
-          link.append(tag);
-        }
-        footer.append(link, copyLink, remove);
-        tile.append(open, footer);
-        return tile;
-      }),
-    );
-    const tile = element('article', undefined, 'saved-card');
-    const add = element('button', undefined, 'saved-add');
-    add.type = 'button';
-    add.setAttribute('aria-label', 'create a new card');
-    const plus = icon('plus');
-    add.append(plus, element('span', 'new card'));
-    add.addEventListener('click', newCard);
-    tile.append(add);
-    $('#saved-list').append(tile);
+    renderSavedCards(cards, {
+      cardUrl,
+      openCard,
+      deleteCard: (slug) => deleteCard(slug, $('#account-error')),
+      copy,
+      newCard,
+    });
   } catch (error) {
     if (version === refreshVersion) $('#account-error').textContent = errorMessage(error);
   }
@@ -1263,17 +1096,7 @@ $('#card-form', HTMLFormElement).addEventListener('input', (event) => {
     composer.spoiler(input.checked);
   else changed();
 });
-$('.page-appearance').addEventListener('input', changed);
-$('#page-theme', HTMLSelectElement).addEventListener('change', changed);
-$('#page-color-scheme', HTMLSelectElement).addEventListener('change', changed);
-$('#reset-page-appearance', HTMLButtonElement).addEventListener('click', () => {
-  if (busy) return;
-  $('#page-theme', HTMLSelectElement).value = 'auto';
-  $('#page-color-scheme', HTMLSelectElement).value = 'auto';
-  for (const mode of themes)
-    for (const [name, input] of pageColorFields[mode]) input.value = PAGE_COLORS[mode][name];
-  changed();
-});
+bindPageAppearance(changed, () => busy);
 $('#reset-seo', HTMLButtonElement).addEventListener('click', () => {
   if (busy) return;
   for (const input of Object.values(seoFields)) input.value = '';
@@ -1491,13 +1314,9 @@ new Sortable($('#page-card-editors'), {
   },
 });
 
-document.querySelectorAll<HTMLButtonElement>('[data-preview-mode]').forEach((button) => {
-  button.addEventListener('click', () => {
-    const mode = button.dataset.previewMode;
-    if (mode !== 'discord' && mode !== 'page') return;
-    previewMode = mode;
-    update();
-  });
+bindPreviewModes((mode) => {
+  previewMode = mode;
+  update();
 });
 $('#add-component', HTMLButtonElement).addEventListener('click', () => {
   if (busy) return;
@@ -2243,65 +2062,7 @@ $('#theme-toggle', HTMLButtonElement).addEventListener('click', () => {
   } catch {}
 });
 
-function syncPagePreview(card: EditorCard, pageMode: boolean) {
-  const theme = (pageMode && card.page_theme) || previewTheme || 'dark';
-  const preview = $('.discord-window');
-  preview.dataset.previewTheme = theme;
-  const scheme = card.page_color_scheme || theme;
-  const colors = pageMode
-    ? { ...(card.page_color_scheme ? PAGE_COLORS[scheme] : {}), ...card.page_colors?.[scheme] }
-    : {};
-  const values = {
-    '--preview-page-bg': colors.background,
-    '--discord-card': colors.card,
-    '--discord-text': colors.text,
-    '--discord-ink': colors.text,
-    '--discord-link': colors.links,
-    '--discord-button': colors.button,
-    '--discord-button-text': colors.button_text,
-    '--discord-button-hover':
-      colors.button &&
-      'color-mix(in srgb, ' +
-        colors.button +
-        ' 85%, ' +
-        (colors.button_text || colors.text || PAGE_COLORS[scheme].text) +
-        ')',
-    '--discord-border':
-      pageMode &&
-      'color-mix(in srgb, ' +
-        (colors.text || PAGE_COLORS[scheme].text) +
-        ' 25%, ' +
-        (colors.card || PAGE_COLORS[scheme].card) +
-        ')',
-    '--discord-muted': colors.text && 'color-mix(in srgb, ' + colors.text + ' 75%, transparent)',
-  };
-  for (const [name, value] of Object.entries(values))
-    if (value) preview.style.setProperty(name, value);
-    else preview.style.removeProperty(name);
-  document.querySelectorAll<HTMLButtonElement>('.preview-themes button').forEach((button) => {
-    button.setAttribute('aria-pressed', String(button.dataset.previewTheme === theme));
-    button.disabled = !!(pageMode && card.page_theme);
-  });
-}
-function applyPreviewTheme(theme: PageTheme) {
-  previewTheme = theme;
-  syncPagePreview(draft(), previewMode === 'page' && (!fields.url.value.trim() || pageTools));
-}
-let previewTheme: PageTheme | undefined;
-try {
-  previewTheme = pageTheme(localStorage.getItem('preview-theme'));
-} catch {}
-applyPreviewTheme(previewTheme ?? 'dark');
-document.querySelectorAll<HTMLButtonElement>('.preview-themes button').forEach((button) => {
-  button.addEventListener('click', () => {
-    const theme = pageTheme(button.dataset.previewTheme);
-    if (!theme) return;
-    applyPreviewTheme(theme);
-    try {
-      localStorage.setItem('preview-theme', theme);
-    } catch {}
-  });
-});
+initPreviewTheme(() => ({ card: draft(), mode: previewMode, pageTools }));
 
 mountIcons();
 syncNavigation();
