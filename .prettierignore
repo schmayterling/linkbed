@@ -1,3 +1,7 @@
-public/vendor/
+public/vendor/*
+!public/vendor/*.d.mts
 public/icons.svg
 package-lock.json
+# emitted next to the .mts sources by npm run build
+public/*.mjs
+admin/*.mjs

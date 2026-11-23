@@ -12,7 +12,6 @@ make a custom discord-styled site or discord embed with **real buttons**, images
 <img width="3046" height="1912" alt="CleanShot 2026-11-17 at 5 45 40 PM@2x" src="https://github.com/user-attachments/assets/f821e171-200f-4e81-ab4d-97a95b1642f4" />
 </a>
 
-
 ## running locally
 
 linkbed requires node 24 or newer.
@@ -24,6 +23,10 @@ npm ci
 cp .env.example .env
 npm run dev
 ```
+
+The server runs TypeScript directly with Node. `npm run build` compiles browser modules to JavaScript, and `npm run dev` watches both.
+
+Before opening a pull request, run `npm run typecheck`, `npm run lint`, `npm run format:check`, and `npm test`.
 
 ## self-hosting
 

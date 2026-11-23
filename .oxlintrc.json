@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": [
+    "public/vendor/*.mjs",
+    "public/*.mjs",
+    "admin/*.mjs",
+    "data/",
+    ".vercel/",
+    "test-results/"
+  ],
+  "rules": {
+    "no-empty": ["error", { "allowEmptyCatch": true }],
+    "no-unused-vars": ["error", { "argsIgnorePattern": "^_", "caughtErrors": "none" }],
+    "typescript/no-explicit-any": "error"
+  }
+}
