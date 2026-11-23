@@ -949,6 +949,8 @@ async function deleteCard(slug: string, errorNode: HTMLElement) {
   }
 }
 
+const savedCardPlural = new Intl.PluralRules('en');
+
 async function refreshCards(initial?: unknown) {
   const version = ++refreshVersion;
   try {
@@ -964,7 +966,9 @@ async function refreshCards(initial?: unknown) {
       update();
     }
     syncAccount();
-    $('#card-count').textContent = String(cards.length);
+    const count = cards.length;
+    const noun = savedCardPlural.select(count) === 'one' ? 'card' : 'cards';
+    $('#card-count').textContent = `${count} saved ${noun}`;
     $('#saved-list').replaceChildren(
       ...cards.map((card) => {
         const tile = element('article', undefined, 'saved-card');

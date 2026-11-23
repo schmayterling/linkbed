@@ -3864,6 +3864,9 @@ label.check-field {
     --text-min: 16px;
     --control-height: 48px;
   }
+  .account-notice .account-actions button {
+    min-height: var(--control-height);
+  }
   main:not(.public-content) {
     padding-top: 8px;
   }
