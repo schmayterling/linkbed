@@ -54,6 +54,16 @@
       components: [{ type: 10, content: 'saved content' }],
     },
   };
+  const longUrl = new URL('https://example.com/' + 'é'.repeat(85)).href;
+  const legacy = {
+    slug: 'legacy-editor-check',
+    title: 'legacy card',
+    description: '',
+    url: null,
+    color: '#5865f2',
+    buttons: [{ label: 'open', url: longUrl }],
+    images: [],
+  };
   window.fetch = async (request, options = {}) => {
     const path = new URL(typeof request === 'string' ? request : request.url, location.href)
       .pathname;
@@ -66,7 +76,16 @@
       signedIn = true;
       return Response.json({ token: 'test-access-token' });
     }
-    if (path === '/api/cards' && method === 'GET') return Response.json([card]);
+    if (path === '/api/cards' && method === 'GET') return Response.json([card, legacy]);
+    if (path === '/api/import' && method === 'POST')
+      return Response.json({
+        title: 'import with a long url',
+        description: 'imported metadata',
+        url: longUrl,
+        color: '#5865f2',
+        buttons: [{ label: 'visit website', url: longUrl }],
+        images: [],
+      });
     if (path === '/api/cards' && method === 'POST') {
       writes++;
       card = JSON.parse(options.body);
@@ -106,7 +125,16 @@
     check(!$('#title').value, 'bottom clear uses the same empty reset');
 
     $('#show-cards').click();
-    await wait(() => $('.saved-url')?.href === location.origin + '/editor-check');
+    await wait(
+      () =>
+        $('.saved-url')?.href === location.origin + '/editor-check' ||
+        $('#account-error').textContent,
+    );
+    check(
+      $('.saved-url')?.href === location.origin + '/editor-check' &&
+        !!document.querySelector('a.saved-url[href$="/legacy-editor-check"]'),
+      'saved list includes cards published under older url limits',
+    );
     const publicUrl = $('.saved-url').href;
     $('.saved-copy').click();
     await wait(() => copied === publicUrl);
@@ -232,6 +260,18 @@
     await wait(() => !$('#publish-result').hidden && !$('#card-form').inert);
     check($('#publish-update-notice').hidden, 'new card success hides Discord update notice');
     $('#publish-result [data-close]').click();
+    await wait(() => !$('#publish-dialog').open);
+
+    $('#show-url-import').click();
+    input('#url-import-value', longUrl);
+    $('#import-button').click();
+    await wait(() => !$('#card-form').inert);
+    check(
+      !$('#url-import-dialog').open &&
+        $('#source-url').value === longUrl &&
+        $('#component-json').value.includes(longUrl),
+      'long imported url opens as an editable draft',
+    );
     return { passed };
   } finally {
     window.fetch = originalFetch;
