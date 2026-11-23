@@ -46,6 +46,8 @@ to access the admin dashboard (which only runs on localhost), run locally with t
 
 ### the other way
 
+Run `npm ci` and `npm run build` before `npm start` when self-hosting with Node.
+
 you can probably figure this out if you have a reverse proxy set up already and have been deploying stuff to your own domains.
 
 ## license
