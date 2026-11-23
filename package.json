@@ -8,13 +8,16 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "node --env-file-if-exists=.env --watch server.mjs",
-    "start": "node --env-file-if-exists=.env server.mjs",
-    "test": "node --test test/*.test.mjs",
-    "lint": "eslint .",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "dev": "npm run build && (tsc -p tsconfig.build.json --watch --preserveWatchOutput & node --env-file-if-exists=.env --watch server.ts)",
+    "start": "npm run build && node --env-file-if-exists=.env server.ts",
+    "pretest": "npm run build",
+    "test": "node --test test/*.test.ts",
+    "lint": "oxlint --deny-warnings",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "vendor": "node scripts/vendor.mjs"
+    "vendor": "node scripts/vendor.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",
@@ -29,10 +32,11 @@
     "sortablejs": "1.15.7"
   },
   "devDependencies": {
-    "@eslint/js": "10.0.1",
-    "eslint": "10.15.0",
-    "eslint-config-prettier": "10.1.8",
-    "globals": "17.14.0",
-    "prettier": "3.10.1"
+    "@types/codemirror": "5.60.18",
+    "@types/node": "26.6.6",
+    "@types/sortablejs": "1.15.9",
+    "oxlint": "1.94.0",
+    "prettier": "3.10.1",
+    "typescript": "7.0.2"
   }
 }

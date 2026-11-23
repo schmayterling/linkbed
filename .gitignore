@@ -6,3 +6,5 @@ data/
 .DS_Store
 test-results/
 .vercel/
+public/*.mjs
+admin/*.mjs

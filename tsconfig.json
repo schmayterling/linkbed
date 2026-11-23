@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "module": "nodenext",
+    "lib": ["es2023", "dom", "dom.iterable"],
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "rootDirs": ["public", "admin"],
+    "skipLibCheck": true
+  },
+  "include": [
+    "*.ts",
+    "api",
+    "scripts",
+    "test/*.ts",
+    "public/*.mts",
+    "public/vendor/*.d.mts",
+    "admin/*.mts"
+  ]
+}
