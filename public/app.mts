@@ -263,18 +263,30 @@ function toast(message: string) {
   }, 2400);
 }
 
-function confirmAction(message: string, label = 'continue') {
-  const dialog = $('#confirm-dialog', HTMLDialogElement);
-  if (busy || dialog.open) return Promise.resolve(false);
+const confirmDialog = $('#confirm-dialog', HTMLDialogElement);
+let resolveConfirmation: ((confirmed: boolean) => void) | undefined;
+
+function finishConfirmation(): boolean {
+  const resolve = resolveConfirmation;
+  if (confirmDialog.open || !resolve) return false;
+  resolveConfirmation = undefined;
+  const confirmed = confirmDialog.returnValue === 'confirm';
+  resolve(confirmed);
+  return confirmed;
+}
+confirmDialog.addEventListener('close', finishConfirmation);
+
+function confirmAction(message: string, label = 'continue'): Promise<boolean> {
+  // A closed dialog can still have a queued close event. Settle it before replacing returnValue.
+  if (busy || confirmDialog.open || finishConfirmation()) return Promise.resolve(false);
   $('#confirm-heading').textContent = message;
   $('#confirm-action', HTMLButtonElement).textContent = label;
-  dialog.returnValue = 'cancel';
-  return new Promise<boolean>((resolve) => {
-    dialog.addEventListener('close', () => resolve(dialog.returnValue === 'confirm'), {
-      once: true,
-    });
-    dialog.showModal();
+  confirmDialog.returnValue = 'cancel';
+  const result = new Promise<boolean>((resolve) => {
+    resolveConfirmation = resolve;
   });
+  confirmDialog.showModal();
+  return result;
 }
 
 function showView(view: View, focus = true) {
