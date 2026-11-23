@@ -72,7 +72,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function hasDraftRoot(value: unknown): boolean {
+function hasCardRoot(value: unknown): boolean {
   if (!isRecord(value)) return false;
   if (value.type === 17) return Array.isArray(value.components);
   return value.type === 'badge_case' && Array.isArray(value.badges);
@@ -504,11 +504,11 @@ function restoreEditor() {
       const { card } = saved;
       const additional = card.additional_cards;
       if (
-        !hasDraftRoot(card.component) ||
+        !hasCardRoot(card.component) ||
         (additional !== undefined &&
           (!Array.isArray(additional) ||
             additional.length >= MAX_CARDS ||
-            !additional.every(hasDraftRoot))) ||
+            !additional.every(hasCardRoot))) ||
         typeof card.url !== 'string' ||
         typeof card.title !== 'string' ||
         typeof card.description !== 'string' ||
@@ -887,6 +887,35 @@ function readSession(value: unknown): { authenticated: boolean; guest: boolean }
   return { authenticated: value.authenticated === true, guest: value.guest === true };
 }
 
+function readEditorCard(value: unknown): Page {
+  if (!isRecord(value) || typeof value.title !== 'string') throw new Error('invalid card data.');
+  const { component, additional_cards: additional, buttons, images } = value;
+  if (
+    (component !== undefined && !hasCardRoot(component)) ||
+    (additional !== undefined && (!Array.isArray(additional) || !additional.every(hasCardRoot))) ||
+    (images !== undefined &&
+      (!Array.isArray(images) || images.some((image) => typeof image !== 'string'))) ||
+    (buttons !== undefined &&
+      (!Array.isArray(buttons) ||
+        buttons.some(
+          (button) =>
+            !isRecord(button) || typeof button.label !== 'string' || typeof button.url !== 'string',
+        )))
+  )
+    throw new Error('invalid card data.');
+  // Keep values from previous saves and imports so users can edit them before write validation.
+  const card = value as EditorCard;
+  return {
+    description: '',
+    url: null,
+    color: null,
+    buttons: [],
+    images: [],
+    ...card,
+    title: value.title,
+  };
+}
+
 function readSavedCard(value: unknown): SavedCard {
   if (!isRecord(value) || typeof value.slug !== 'string')
     throw new Error('invalid saved card response.');
@@ -902,7 +931,7 @@ function readSavedCard(value: unknown): SavedCard {
       badges.push({ name: badge.name, image: badge.image });
   }
   return {
-    ...normalizeCard(value),
+    ...readEditorCard(value),
     slug: value.slug,
     sponsored: value.sponsored === true,
     badges,
@@ -1053,7 +1082,7 @@ async function reset(ask = true) {
   const starter = document.querySelector('#starter-card')?.textContent;
   fill(
     starter
-      ? normalizeCard(JSON.parse(starter))
+      ? readEditorCard(JSON.parse(starter))
       : {
           url: 'https://ryanaque.com/',
           title: 'may 🦋',
@@ -1752,7 +1781,7 @@ $('#url-import-form', HTMLFormElement).addEventListener('submit', async (event) 
     const url = httpsUrl($('#url-import-value', HTMLInputElement).value.trim());
     setBusy(true);
     $('#import-button', HTMLButtonElement).textContent = 'importing…';
-    const card = normalizeCard(
+    const card = readEditorCard(
       await api('/api/import', { method: 'POST', body: JSON.stringify({ url }) }),
     );
     fill(card, editing || (slugEdited ? fields.slug.value : slugify(card.title)));
