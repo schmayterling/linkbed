@@ -89,7 +89,7 @@ export function renderNotFound(origin: string): string {
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="404 | linkbed">
 <meta name="twitter:description" content="this link does not exist or has been suspended">
-<link rel="icon" href="https://github.com/schmayterling.png?size=64" type="image/png">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/style.css">
 </head><body class="public-page not-found-page">
 <main class="public-content not-found-content">
@@ -167,7 +167,7 @@ ${image ? `<meta property="og:image" content="${e(image)}">` : ''}
 ${image ? `<meta name="twitter:image" content="${e(image)}">` : ''}
 <link rel="canonical" href="${e(url)}">
 ${color ? `<meta name="theme-color" content="${e(color)}">` : ''}
-<link rel="icon" href="${e(card.seo?.favicon || 'https://github.com/schmayterling.png?size=64')}">
+<link rel="icon" href="${e(card.seo?.favicon || '/favicon.svg')}">
 <link rel="stylesheet" href="/style.css">
 <script type="module"${redirect ? '' : ' blocking="render"'} src="${redirect ? '/redirect.mjs' : '/card.mjs'}"></script>
 ${embedScript(card)}
