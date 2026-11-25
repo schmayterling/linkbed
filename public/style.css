@@ -1721,6 +1721,27 @@ details[open] > summary {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+.site-footer .schmayterling-credit {
+  color: var(--ink);
+  text-decoration: none;
+}
+/* the schmayterling brand kit's logo/lockup.svg. the kit allows only ink on light (#1d1d1f) and paper on dark (#f5f5f5),
+   never the page's own ink. 1.64em tall and lowered 0.44em sets the name on the text's baseline at about its cap height.
+   the credit shows on the home editor and the legal pages, never on "your cards" or published pages. */
+.schmayterling-lockup {
+  display: inline-block;
+  width: auto;
+  height: 1.64em;
+  margin-inline: 0.1em -0.25em;
+  vertical-align: -0.44em;
+  fill: #1d1d1f;
+}
+[data-theme='dark'] .schmayterling-lockup {
+  fill: #f5f5f5;
+}
+body[data-view='cards'] .schmayterling-credit-line {
+  display: none;
+}
 .site-footer p {
   text-wrap: balance;
 }
